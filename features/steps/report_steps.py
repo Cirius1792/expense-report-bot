@@ -18,6 +18,12 @@ from features.steps.common_steps import (
 # ── Given steps for seeded expenses ─────────────────────────────────────────
 
 
+def _csv_text(context: Any) -> str:
+    """CSV content captured by the report steps, normalised to text."""
+    raw = getattr(context, "_csv_content", "")
+    return raw.decode("utf-8") if isinstance(raw, bytes) else raw
+
+
 @given("I have recorded the following expenses this month:")
 def step_seed_expenses_table(context: Any) -> None:
     """Seed multiple expenses from a Gherkin data table."""
@@ -91,9 +97,8 @@ def step_csv_file_sent(context: Any, filename: str) -> None:
 
 @then("the CSV should contain {count:d} expense rows")
 def step_csv_row_count(context: Any, count: int) -> None:
-    csv_content = getattr(context, "_csv_content", b"")
-    text = csv_content.decode("utf-8") if isinstance(csv_content, bytes) else csv_content
-    lines = [line for line in text.strip().split("\n") if line.strip()]
+    csv_content = _csv_text(context)
+    lines = [line for line in csv_content.strip().split("\n") if line.strip()]
     # Subtract header line
     data_rows = lines[1:] if len(lines) > 0 else []
     assert len(data_rows) == count, (
@@ -101,11 +106,40 @@ def step_csv_row_count(context: Any, count: int) -> None:
     )
 
 
+@then('the CSV header should be "{header}"')
+def step_csv_header(context: Any, header: str) -> None:
+    """The header line is exactly the given column list, key leading (E6)."""
+    lines = [line for line in _csv_text(context).strip().split("\n") if line.strip()]
+    assert lines, "CSV has no content"
+    assert lines[0] == header, f'Expected header "{header}", got "{lines[0]}"'
+
+
+@then('the first CSV row should lead with "{key}"')
+def step_first_row_leads_with_key(context: Any, key: str) -> None:
+    """The first data row's leading field is its per-person key (E6)."""
+    lines = [line for line in _csv_text(context).strip().split("\n") if line.strip()]
+    data_rows = lines[1:]
+    assert data_rows, "CSV has no data rows"
+    assert data_rows[0].split(",")[0] == key, (
+        f'Expected leading key "{key}", got row "{data_rows[0]}"'
+    )
+
+
+@then('the CSV row for "{merchant}" should lead with "{key}"')
+def step_row_for_merchant_leads_with_key(context: Any, merchant: str, key: str) -> None:
+    """Each row carries its own key in the leading column (E6, per-row)."""
+    rows = [line for line in _csv_text(context).strip().split("\n") if line.strip()][1:]
+    matches = [row for row in rows if merchant in row]
+    assert matches, f"No CSV row mentions merchant {merchant!r}"
+    assert all(row.split(",")[0] == key for row in matches), (
+        f"Expected leading key {key} for {merchant!r}, got rows: {matches}"
+    )
+
+
 @then('the first row should contain "{text}"')
 def step_first_row_contains(context: Any, text: str) -> None:
-    csv_content = getattr(context, "_csv_content", b"")
-    text_content = csv_content.decode("utf-8") if isinstance(csv_content, bytes) else csv_content
-    lines = text_content.strip().split("\n")
+    csv_content = _csv_text(context)
+    lines = csv_content.strip().split("\n")
     assert len(lines) >= 1, "CSV has no content"
     data_rows = lines[1:]
     assert len(data_rows) >= 1, "CSV has no data rows"
@@ -136,13 +170,12 @@ def step_no_file_sent(context: Any) -> None:
 
 @then('the CSV should contain "{text}"')
 def step_csv_contains(context: Any, text: str) -> None:
-    csv_content = getattr(context, "_csv_content", b"")
-    text_content = csv_content.decode("utf-8") if isinstance(csv_content, bytes) else csv_content
-    assert text in text_content, f'Expected CSV to contain "{text}", got: {text_content}'
+    assert text in _csv_text(context), (
+        f'Expected CSV to contain "{text}", got: {_csv_text(context)}'
+    )
 
 
 @then('the CSV should not contain "{text}"')
 def step_csv_not_contains(context: Any, text: str) -> None:
-    csv_content = getattr(context, "_csv_content", b"")
-    text_content = csv_content.decode("utf-8") if isinstance(csv_content, bytes) else csv_content
+    text_content = _csv_text(context)
     assert text not in text_content, f'CSV should not contain "{text}", got: {text_content}'

@@ -257,7 +257,7 @@ class TestGenerateCsvReport:
         result = use_case.generate_csv_report(12345, 2026, 7)
 
         repo.get_by_user_and_month.assert_called_once_with(12345, 2026, 7)
-        assert "date,merchant,category,amount,currency" in result
+        assert "user_key,date,merchant,category,amount,currency" in result
         assert "Shop A" in result
         assert "Shop B" in result
 
@@ -271,7 +271,7 @@ class TestGenerateCsvReport:
 
         result = use_case.generate_csv_report(12345, 2026, 3)
 
-        assert "date,merchant,category,amount,currency" in result
+        assert "user_key,date,merchant,category,amount,currency" in result
         # Header only — no data rows
         lines = result.strip().split("\n")
         assert len(lines) == 1
