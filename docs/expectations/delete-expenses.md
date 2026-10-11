@@ -78,7 +78,7 @@
 | Keys visible in /list | `test_month_view_leads_each_row_with_key` + `test_month_view_renders_placeholder_for_missing_key` (pytest), list.feature key assertions (behave) — E2 |
 | /delete soft-deletes user-scoped | `TestDeleteHandler` tests (pytest), delete.feature (behave) — E4, E14 |
 | /delete invalid format usage | `test_delete_handler_malformed_key_replies_usage_from_status`, `test_delete_handler_impossible_date_key_replies_usage`, `test_delete_handler_blank_argument_replies_usage_without_calling_the_port`, `test_delete_handler_no_argument_replies_usage` (pytest), delete.feature invalid-command table (behave) — E8 |
-| invalid key rejected in the application layer | `test_delete_expense_rejects_malformed_key_without_touching_repository[20261340-1]` + `[abc]` (pytest) — `status="invalid_key"` and repository mock `assert_not_called` |
+| invalid key rejected in the application layer | `test_delete_expense_rejects_malformed_key_without_touching_repository[20261340-1]` + `[abc]` (pytest) — `status="invalid_key"` and repository mock `assert_not_called`; the predicate itself: `TestExpenseKeyPredicate` (8 tests, `tests/domain/test_expense_keys.py`) — ADR 0019 |
 | User-scoped not-found | `test_delete_by_user_key_returns_none_for_another_persons_key` (pytest), delete.feature (behave) — E9, E11 |
 | Save confirmations with key + button | `test_confirmation_line_shows_key_without_hash` + `test_delete_callback_payload_carries_key` (pytest), telegram_bot.feature + correction.feature (behave) — E1, E3 |
 | Delete button strikethrough edit | `TestDeleteCallbackHandler` (pytest), delete.feature @story-18 (behave) — E3 |
