@@ -132,7 +132,8 @@ Files touched:
   before any handler — no routing, no reply, no keyboard interaction.
 - Group chat: the bar is shown to all members (`selective` not set); the bot
   is intended for private, whitelisted use — documented.
-- `/delete <id>`, correction, extraction, and recording flows are unchanged.
+- `/delete <key>` (ADR 0016 cutover — the per-person key, no leading `#`), correction, extraction,
+  and recording flows are otherwise unchanged by the keyboard.
 
 ### Behaviors that must NOT happen
 
