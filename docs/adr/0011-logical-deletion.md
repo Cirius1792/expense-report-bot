@@ -3,6 +3,10 @@
 **Date:** 2026-07-19
 **Status:** Accepted
 
+> **Note (2026-10-10):** every "ADR 0010 (user-scoped ids)" reference below points at a file
+> that was never written. That decision now lives in ADR 0016 — User-scoped Expense Keys.
+> No renumbering.
+
 ## Context
 
 Expenses are currently removed from the `expenses` table with a physical
@@ -45,7 +49,8 @@ Replace physical deletion with **logical deletion**:
 - No `DELETE FROM expenses` remains in the codebase.
 - `delete_by_id` signature is unchanged. Read methods filter deleted rows
   unconditionally; there is no `include_deleted` parameter on the port.
-- ADR 0010 (user-scoped ids) now depends on this ADR being implemented first.
+- ADR 0010 (user-scoped ids) now depends on this ADR being implemented first — ADR 0016 is
+  the file that was actually written for that decision.
 - `Expense` construction sites (`_build_expense`, `_row_to_expense`, tests) must
   supply `deleted_at`.
 
