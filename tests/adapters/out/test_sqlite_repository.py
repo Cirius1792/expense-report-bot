@@ -750,6 +750,49 @@ class TestDeleteUnderMissingUniqueness:
         }
         assert stamps[2] == "2026-01-01T00:00:00"
 
+    def _seed_live_twin_rows(self, drifted_db: str) -> None:
+        """Two rows sharing (user_id, user_key), both live."""
+        columns = (
+            "id, amount, currency, merchant, date, category, user_id, "
+            "receipt_photo_id, created_at, deleted_at, user_key"
+        )
+        with sqlite3.connect(drifted_db) as connection:
+            for row_id, merchant in ((1, "Shop"), (2, "Cafe")):
+                connection.execute(
+                    f"INSERT INTO expenses ({columns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        row_id,
+                        "10.00",
+                        "EUR",
+                        merchant,
+                        "2026-07-10",
+                        None,
+                        7,
+                        None,
+                        "2026-07-10T12:00:00",
+                        None,
+                        "20260710-1",
+                    ),
+                )
+
+    def test_delete_by_user_key_stamps_only_the_row_the_select_returned(
+        self, drifted_db: str
+    ) -> None:
+        """The twin the SELECT did not return stays live."""
+        self._seed_live_twin_rows(drifted_db)
+        repo = self._drifted_repo(drifted_db)
+
+        repo.delete_by_user_key(user_id=7, user_key="20260710-1")
+
+        stamps = {
+            row["id"]: row["deleted_at"]
+            for row in repo._conn.execute(
+                "SELECT id, deleted_at FROM expenses WHERE user_id = 7 AND user_key = ?",
+                ("20260710-1",),
+            )
+        }
+        assert stamps[2] is None
+
     def test_delete_by_user_key_deletes_the_live_twin_under_drift(self, drifted_db: str) -> None:
         """The live row is still the one that gets deleted."""
         self._seed_twin_rows(drifted_db)
