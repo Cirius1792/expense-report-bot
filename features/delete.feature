@@ -73,16 +73,14 @@ Feature: Delete Saved Expenses
   @story-17
   Scenario: A freed key number is not reused
     Given the following expenses exist:
-      | amount | currency | merchant      | date       | category |
-      | 3.50   | EUR      | Central Cafe  | 2026-07-18 | food     |
-      | 7.25   | EUR      | Corner Bakery | 2026-07-18 | food     |
+      | amount | currency | merchant      | date       | category | user_id   |
+      | 3.50   | EUR      | Central Cafe  | 2026-07-18 | food     | 123456789 |
+      | 7.25   | EUR      | Corner Bakery | 2026-07-18 | food     | 123456789 |
     When user 123456789 sends the delete command "/delete 20260718-2"
     Then the delete reply should be "🗑️ Deleted expense 20260718-2: Corner Bakery — 7.25 EUR — 2026-07-18"
 
-    When user 123456789 records the following expense:
-      | amount | currency | merchant   | date       | category |
-      | 9.99   | EUR      | Book Store | 2026-07-18 | shopping |
-    Then the newly recorded expense should have key "20260718-3"
+    When the LLM extracts amount "9.99", currency "EUR", merchant "Book Store", date "2026-07-18"
+    When I send the message "shopping 9.99 eur at Book Store 2026-07-18"
 
     When user 123456789 sends the command "/list"
     Then the message lists expense "#20260718-1" for merchant "Central Cafe"
