@@ -342,12 +342,6 @@ def _make_callback_query_update(context: Any, callback_data: str) -> MagicMock:
     return update
 
 
-# Task 6 pins the month-view row as `#{user_key:<10} {date}  {merchant:<20} …`:
-# one `#`, a 10-char key cell, one separator space, then the ISO date.
-_KEY_CELL_WIDTH = 10
-_DATE_COLUMN = 1 + _KEY_CELL_WIDTH + 1
-
-
 def _expense_row_lines(text: str) -> list[str]:
     """Month-view row lines, identified by the leading `#` key marker.
 
@@ -364,20 +358,29 @@ def _row_key(line: str) -> str | None:
 
 
 def _claimed_row_count(text: str) -> int | None:
-    """The row count the month view claims in its `Total: … (N expenses)` line."""
-    match = re.search(r"\((\d+) expenses?\)", text)
+    """The row count the month view claims on its `Total:` line.
+
+    Anchored to the `Total:` line: a merchant or category whose text happens to
+    look like `(3 expenses)` must never stand in for the listing's own claim.
+    """
+    match = re.search(r"^Total:.*\((\d+) expenses?\)", text, re.MULTILINE)
     return int(match.group(1)) if match else None
 
 
 def _key_matches_row_date(key: str, line: str) -> bool:
     """True when the key's 8-digit prefix is the date printed in that row's column.
 
-    Reads the date at the fixed offset Task 6 pins (`#{user_key:<10} {date}  …`),
-    immediately after the key cell. Scanning the whole line for any ISO date
-    would let a merchant or category containing a date loosen the invariant.
+    Parses the row's tokens (`#<key> <date> …`) rather than reading at a fixed
+    offset: Task 6 pads the key cell to 10 chars but never truncates it, so an
+    11-char key (`20260710-10`, the 11th expense on a date) shifts the date
+    column and a fixed-offset read would report a false failure. The `-`
+    placeholder row still parses — its date is captured, and the unkeyed-row
+    assertion is what rejects it.
     """
-    field = line[_DATE_COLUMN : _DATE_COLUMN + len("YYYY-MM-DD")]
-    return field.replace("-", "") == key.partition("-")[0]
+    match = re.match(r"^#(\S+)\s+(\d{4}-\d{2}-\d{2})\b", line)
+    if match is None:
+        return False
+    return match.group(2).replace("-", "") == key.partition("-")[0]
 
 
 def _get_all_button_labels(markup: Any) -> list[str]:
