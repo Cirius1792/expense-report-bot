@@ -782,7 +782,8 @@ class TestDeleteUnderMissingUniqueness:
         self._seed_live_twin_rows(drifted_db)
         repo = self._drifted_repo(drifted_db)
 
-        repo.delete_by_user_key(user_id=7, user_key="20260710-1")
+        returned = repo.delete_by_user_key(user_id=7, user_key="20260710-1")
+        assert returned is not None
 
         stamps = {
             row["id"]: row["deleted_at"]
@@ -791,7 +792,8 @@ class TestDeleteUnderMissingUniqueness:
                 ("20260710-1",),
             )
         }
-        assert stamps[2] is None
+        unselected = [row_id for row_id in stamps if row_id != returned.id]
+        assert all(stamps[row_id] is None for row_id in unselected)
 
     def test_delete_by_user_key_deletes_the_live_twin_under_drift(self, drifted_db: str) -> None:
         """The live row is still the one that gets deleted."""

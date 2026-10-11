@@ -20,7 +20,7 @@ ADR 0016 keeps it as the storage join target and it is never shown or accepted.
 **Why.** The index is not a guarantee the adapter can rely on. Changeset `003-add-user-key`
 guards itself with a precondition that uses `onFail="MARK_RAN"`, so a schema that
 already has `user_key` but is missing the index runs nothing and is still marked
-applied; ADR 0016 sanctions table-rebuild changesets, which are the kind of change
+applied; ADR 0013 sanctions table-rebuild changesets, which are the kind of change
 that can forget to re-create an index. In that state a key-pair UPDATE silently
 re-stamps rows that were never read — invisible to the user, so a silent failure
 mode. Two intermediate shapes were considered and rejected:
@@ -31,7 +31,8 @@ mode. Two intermediate shapes were considered and rejected:
   re-stamp a dead row; the clause keeps the write idempotent with the read.
 
 **Consequences.**
-- The write provably touches at most the row the read returned; rowcount is 0 or 1.
+- The write provably touches at most the row the read returned — the predicate can
+  match no more than one row, since `id` is the table's primary key.
 - No behaviour change on a correctly-migrated database (the UNIQUE index already
   bounds the key pair to one row), so no existing test changes.
 - Pinned by `TestDeleteUnderMissingUniqueness` in
