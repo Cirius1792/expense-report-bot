@@ -41,7 +41,9 @@ port.
    `UPDATE ... SET deleted_at = ?` instead of a `DELETE`, and still returns the
    deleted `Expense` for the success message. No application-layer caller changes.
    *(ADR 0016 later renames the port method to `delete_by_user_key(user_id, user_key)`; the
-   UPDATE mechanism recorded here is unchanged.)*
+   UPDATE mechanism recorded here is unchanged. Hardened 2026-10-11: the UPDATE predicate
+   carries `AND deleted_at IS NULL`, so it addresses exactly the row the SELECT found and
+   does not rely on the UNIQUE index for that.)*
 5. **Filtering lives in the driven adapter.** The SQLite queries add
    `AND deleted_at IS NULL`. The application layer needs no read-path changes —
    this is the hexagonal win.
@@ -83,6 +85,10 @@ port.
 - [ ] Every read method filters deleted rows by default.
 - [ ] A wrong-user `/delete` still returns "not found" (user scoping preserved).
 - [ ] Soft-deleting does not reuse the row's id or disturb sibling rows.
+- [ ] The soft-delete UPDATE addresses only live rows: an already-deleted row sharing
+      `(user_id, user_key)` keeps its original `deleted_at`, even on a schema whose
+      UNIQUE index is missing (changeset drift — the changeset precondition uses
+      `onFail="MARK_RAN"`).
 - [ ] Existing databases migrate cleanly: pre-existing rows read as not-deleted.
 
 ### Must NOT happen
@@ -106,6 +112,7 @@ port.
 | logical delete via UPDATE, row retained | `tests/adapters/out/test_sqlite_repository.py::TestLogicalDeletion::test_delete_by_user_key_soft_deletes_row_retained` |
 | reads filter deleted rows by default | `tests/adapters/out/test_sqlite_repository.py::TestLogicalDeletion::test_get_by_id_filters_deleted_by_default`, `::test_get_by_user_and_month_filters_deleted_by_default`, `::test_get_months_with_expenses_excludes_deleted`, `::test_get_total_by_user_and_year_excludes_deleted`, `::test_soft_delete_does_not_disturb_siblings` |
 | user scoping preserved on delete | `tests/adapters/out/test_sqlite_repository.py::TestDeleteByUserKey::test_delete_by_user_key_scoped_to_user` |
+| delete never re-stamps an already-deleted row | `tests/adapters/out/test_sqlite_repository.py::TestDeleteUnderMissingUniqueness::test_delete_by_user_key_never_restamps_an_already_deleted_twin`, `::test_delete_by_user_key_deletes_the_live_twin_under_drift` |
 | already-deleted delete returns not-found | `tests/adapters/out/test_sqlite_repository.py::TestLogicalDeletion::test_delete_already_deleted_returns_none` |
 | application layer unchanged | `tests/application/test_expense_queries.py` (all passing, no edits) |
 | schema migration | `tests/migrations/test_changelog.py::test_legacy_database_gains_deleted_at_without_losing_rows` (renamed from `TestSchemaMigration::test_existing_db_without_deleted_at_migrates` by ADR 0013) |
