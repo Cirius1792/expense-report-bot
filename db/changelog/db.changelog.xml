@@ -28,4 +28,17 @@
         <sql>ALTER TABLE expenses ADD COLUMN deleted_at TEXT</sql>
     </changeSet>
 
+    <changeSet id="003-add-user-key" author="expense-report">
+        <preconditions onFail="MARK_RAN" onError="HALT">
+            <not>
+                <sqlCheck expectedResult="1">SELECT CASE WHEN EXISTS (SELECT 1 FROM pragma_table_info('expenses') WHERE name = 'user_key') THEN '1' ELSE '0' END</sqlCheck>
+            </not>
+        </preconditions>
+        <sql>CREATE TABLE expenses_new (id INTEGER PRIMARY KEY AUTOINCREMENT, amount TEXT NOT NULL, currency TEXT NOT NULL, merchant TEXT NOT NULL, date TEXT NOT NULL, category TEXT, user_id INTEGER NOT NULL, receipt_photo_id TEXT, created_at TEXT NOT NULL, deleted_at TEXT, user_key TEXT);</sql>
+        <sql>CREATE UNIQUE INDEX uk ON expenses_new (user_id, user_key);</sql>
+        <sql>INSERT INTO expenses_new (id, amount, currency, merchant, date, category, user_id, receipt_photo_id, created_at, deleted_at) SELECT id, amount, currency, merchant, date, category, user_id, receipt_photo_id, created_at, deleted_at FROM expenses;</sql>
+        <sql>DROP TABLE expenses;</sql>
+        <sql>ALTER TABLE expenses_new RENAME TO expenses;</sql>
+    </changeSet>
+
 </databaseChangeLog>

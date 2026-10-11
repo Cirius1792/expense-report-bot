@@ -89,17 +89,19 @@ def changelog_digest() -> str:
 
 
 def dump_application_schema(db_path: Path) -> str:
-    """Return every application-owned schema object, in deterministic order.
+    """Return every application-owned schema object, in dependency order.
 
     Covers indexes, triggers and views as well as tables, so a changelog change
-    that does not touch ``expenses`` still changes this output.
+    that does not touch ``expenses`` still changes this output. Tables are emitted
+    before the objects that reference them (indexes, views), so the snapshot is
+    re-appliable by ``apply_snapshot`` via ``executescript`` in the same order.
     """
     with sqlite3.connect(str(db_path)) as connection:
         rows = connection.execute(
             """
             SELECT type, name, sql FROM sqlite_master
             WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'
-            ORDER BY type, name
+            ORDER BY CASE WHEN type = 'table' THEN 0 ELSE 1 END, type, name
             """
         ).fetchall()
     statements = [

@@ -35,7 +35,7 @@ def test_reapplying_changelog_is_no_op(tmp_path: Path) -> None:
     migrate_with_liquibase(db)
     with sqlite3.connect(db) as connection:
         after = connection.execute("SELECT COUNT(*) FROM databasechangelog").fetchone()[0]
-    assert after == before == 2
+    assert after == before == 3
 
 
 def test_legacy_database_gains_deleted_at_without_losing_rows(tmp_path: Path) -> None:
@@ -67,7 +67,7 @@ def test_legacy_database_gains_deleted_at_without_losing_rows(tmp_path: Path) ->
     with sqlite3.connect(db) as connection:
         row = connection.execute("SELECT merchant, deleted_at FROM expenses").fetchone()
         assert row == ("Legacy Shop", None)
-        assert connection.execute("SELECT COUNT(*) FROM databasechangelog").fetchone()[0] == 2
+        assert connection.execute("SELECT COUNT(*) FROM databasechangelog").fetchone()[0] == 3
 
 
 def test_current_schema_database_is_baselined_without_data_loss(tmp_path: Path) -> None:
@@ -100,5 +100,5 @@ def test_current_schema_database_is_baselined_without_data_loss(tmp_path: Path) 
         assert connection.execute("SELECT amount, merchant FROM expenses").fetchall() == [
             ("9.99", "Baseline Shop")
         ]
-        assert connection.execute("SELECT COUNT(*) FROM databasechangelog").fetchone()[0] == 2
+        assert connection.execute("SELECT COUNT(*) FROM databasechangelog").fetchone()[0] == 3
     assert dump_application_schema(db) == schema_before
