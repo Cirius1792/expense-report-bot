@@ -8,6 +8,12 @@
 > **Note (2026-10-10):** the "ADR 0010 (user-scoped ids)" references below point at a file
 > that was never written. That decision now lives in ADR 0016 — User-scoped Expense Keys.
 > No renumbering.
+>
+> **Superseded by ADR 0016 (issue #16), 2026-10-11:** the storage mechanism described here still
+> holds, but the *names* below are pre-cutover. `delete_by_id` was dropped when
+> `delete_by_user_key(user_id, user_key)` arrived (spec §6.10, no transitional surface), and the
+> user-facing identifier in the success message is the key, not `#<id>`. The evidence table lists
+> the current test names.
 
 ## Concept
 
@@ -34,6 +40,8 @@ port.
 4. **`delete_by_id` keeps its signature and becomes logical.** It now performs an
    `UPDATE ... SET deleted_at = ?` instead of a `DELETE`, and still returns the
    deleted `Expense` for the success message. No application-layer caller changes.
+   *(ADR 0016 later renames the port method to `delete_by_user_key(user_id, user_key)`; the
+   UPDATE mechanism recorded here is unchanged.)*
 5. **Filtering lives in the driven adapter.** The SQLite queries add
    `AND deleted_at IS NULL`. The application layer needs no read-path changes —
    this is the hexagonal win.
@@ -50,8 +58,8 @@ port.
 | Layer | Change |
 |---|---|
 | `domain/models.py` | `Expense` gains `deleted_at: datetime \| None`. |
-| `ports/repository.py` | Read methods filter deleted rows unconditionally; `delete_by_id` semantics change to logical. |
-| `adapters/out/sqlite_repository.py` | Schema migration + per-query `deleted_at` filtering; `save` persists `deleted_at`; `delete_by_id` becomes an `UPDATE`. |
+| `ports/repository.py` | Read methods filter deleted rows unconditionally; `delete_by_id` semantics change to logical (renamed `delete_by_user_key` by ADR 0016). |
+| `adapters/out/sqlite_repository.py` | Schema migration + per-query `deleted_at` filtering; `save` persists `deleted_at`; the delete becomes an `UPDATE`. |
 | `application/expense_queries.py` | No read-path changes. `delete_expense` unchanged (delegates to the port). |
 | `application/expense_recording.py` | `_build_expense` sets `deleted_at=None` for fresh expenses. |
 | `adapters/inbound/telegram_bot.py` | No user-facing change. Deleted rows simply vanish from listings. |
@@ -90,9 +98,9 @@ port.
 | Expectation | Test location |
 |---|---|
 | deleted_at persisted as None on save | `tests/adapters/out/test_sqlite_repository.py::TestLogicalDeletion::test_save_leaves_deleted_at_none` |
-| logical delete via UPDATE, row retained | `tests/adapters/out/test_sqlite_repository.py::TestLogicalDeletion::test_delete_by_id_soft_deletes_row_retained` |
+| logical delete via UPDATE, row retained | `tests/adapters/out/test_sqlite_repository.py::TestLogicalDeletion::test_delete_by_user_key_soft_deletes_row_retained` |
 | reads filter deleted rows by default | `tests/adapters/out/test_sqlite_repository.py::TestLogicalDeletion::test_get_by_id_filters_deleted_by_default`, `::test_get_by_user_and_month_filters_deleted_by_default`, `::test_get_months_with_expenses_excludes_deleted`, `::test_get_total_by_user_and_year_excludes_deleted`, `::test_soft_delete_does_not_disturb_siblings` |
-| user scoping preserved on delete | `tests/adapters/out/test_sqlite_repository.py::TestDeleteById::test_delete_by_id_scoped_to_user` |
+| user scoping preserved on delete | `tests/adapters/out/test_sqlite_repository.py::TestDeleteByUserKey::test_delete_by_user_key_scoped_to_user` |
 | already-deleted delete returns not-found | `tests/adapters/out/test_sqlite_repository.py::TestLogicalDeletion::test_delete_already_deleted_returns_none` |
 | application layer unchanged | `tests/application/test_expense_queries.py` (all passing, no edits) |
 | schema migration | `tests/adapters/out/test_sqlite_repository.py::TestSchemaMigration::test_existing_db_without_deleted_at_migrates` |
