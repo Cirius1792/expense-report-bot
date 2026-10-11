@@ -23,6 +23,7 @@ class TestExpenseRepositoryPortProtocol:
             def save(self, expense: Expense) -> Expense:
                 stored = Expense(
                     id=1 if expense.id is None else expense.id,
+                    user_key=f"{expense.date:%Y%m%d}-1",
                     amount=expense.amount,
                     currency=expense.currency,
                     merchant=expense.merchant,
@@ -39,12 +40,12 @@ class TestExpenseRepositoryPortProtocol:
             def get_by_id(self, expense_id: int) -> Expense | None:
                 return self._store.get(expense_id)
 
-            def delete_by_id(self, user_id: int, expense_id: int) -> Expense | None:
-                expense = self._store.get(expense_id)
-                if expense is None or expense.user_id != user_id:
-                    return None
-                del self._store[expense_id]
-                return expense
+            def delete_by_user_key(self, user_id: int, user_key: str) -> Expense | None:
+                for expense_id, expense in list(self._store.items()):
+                    if (expense.user_id, expense.user_key) == (user_id, user_key):
+                        del self._store[expense_id]
+                        return expense
+                return None
 
             def get_by_user_and_month(
                 self,
@@ -90,6 +91,7 @@ class TestExpenseRepositoryPortProtocol:
             def save(self, expense: Expense) -> Expense:
                 stored = Expense(
                     id=42,
+                    user_key=f"{expense.date:%Y%m%d}-1",
                     amount=expense.amount,
                     currency=expense.currency,
                     merchant=expense.merchant,
@@ -105,12 +107,12 @@ class TestExpenseRepositoryPortProtocol:
             def get_by_id(self, expense_id: int) -> Expense | None:
                 return self._store.get(expense_id)
 
-            def delete_by_id(self, user_id: int, expense_id: int) -> Expense | None:
-                expense = self._store.get(expense_id)
-                if expense is None or expense.user_id != user_id:
-                    return None
-                del self._store[expense_id]
-                return expense
+            def delete_by_user_key(self, user_id: int, user_key: str) -> Expense | None:
+                for expense_id, expense in list(self._store.items()):
+                    if (expense.user_id, expense.user_key) == (user_id, user_key):
+                        del self._store[expense_id]
+                        return expense
+                return None
 
             def get_by_user_and_month(
                 self,
@@ -128,6 +130,7 @@ class TestExpenseRepositoryPortProtocol:
         dt = datetime(2026, 7, 1, 12, 0, 0)
         expense = Expense(
             id=None,
+            user_key=None,
             amount=Decimal("10.00"),
             currency="EUR",
             merchant="Shop",

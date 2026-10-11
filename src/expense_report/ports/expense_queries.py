@@ -61,9 +61,12 @@ class ExpenseQueryPort(Protocol):
         """Generate a CSV report string for the given period."""
         ...
 
-    def delete_expense(self, user_id: int, expense_id: int) -> DeletionResult:
-        """Delete a single expense. Returns DeletionResult with the deleted
-        Expense or None if not found."""
+    def delete_expense(self, user_id: int, key: str) -> DeletionResult:
+        """Delete a single expense addressed by its per-person key.
+
+        Returns DeletionResult with the deleted Expense or None if the key did
+        not address a live expense of this person.
+        """
         ...
 
 
