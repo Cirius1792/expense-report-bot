@@ -140,12 +140,41 @@ payload, CSV row, CLI stdout.
 - No `DELETE FROM expenses` in `src/`; no `include_deleted` surface.
 - `domain/` stays framework-free.
 
-## Deferred — but not shippable apart
+### E15 — Legacy rows gain a valid key at migration time
 
-Backfill/migration of keys for Expenses that already exist in a database is separate work
-(spec §8). **The two ship together**: nothing is released in the state where new Expenses
-have keys and older ones do not, so the `-` cell of E2 exists only inside the repository and
-in tests, never in a user's database.
+- A database whose Expenses predate `user_key` (every row `NULL`) gains a key for **every**
+  row once `liquibase update` has applied changeset `004-backfill-user-key`; no row is left
+  `NULL` afterward.
+- The key prefix is the row's own `date` (`YYYYMMDD-`), and `n` is a per-`(user_id, date)`
+  counter; the migration assigns numbers in **insertion order** (ascending internal `id`).
+- No key reflects wall-clock `created_at`, a global counter, or another person's data.
+
+### E16 — Backfilled numbering is dense, so future inserts never collide
+
+- After backfill, for each `(user_id, date)` the existing keys are exactly `1, 2, …, N` — no
+  gaps — where `N` counts **all** rows including soft-deleted ones.
+- Consequently the next `save()` for that `(user_id, date)` computes `COUNT(id) + 1 = N + 1`,
+  which is free; a freed number from a soft-deleted row is still never handed out again (E10).
+- Two people with Expenses on the same date are numbered independently; both start at `-1`
+  (E11), and a shared key text identifies two different rows.
+
+### E17 — The backfill preserves rows and is idempotent
+
+- Every pre-existing row survives with `id`, `amount`, `currency`, `merchant`, `date`,
+  `category`, `user_id`, `receipt_photo_id`, `created_at`, and `deleted_at` unchanged; only
+  `user_key` is populated.
+- Soft-deleted rows keep `deleted_at` and still receive keys.
+- Applying the changelog a second time is a no-op (Liquibase tracks `004`); a fresh database
+  with zero rows is unaffected.
+
+## Backfill ships with the slice
+
+Backfill of keys for Expenses that already exist in a database is changeset
+`004-backfill-user-key` (spec §8). **It ships together with the keying slice**: the container
+entrypoint, the app (`main()`), the `expense-extract` CLI, and the test fixtures all run
+`liquibase update` before any read, so nothing is released in the state where new Expenses
+have keys and older ones do not. The `-` cell of E2 therefore exists only inside the
+repository and in tests, never in a user's database.
 
 ## Expectation → test-name mapping
 
@@ -171,3 +200,6 @@ names no test for an E-id, the row says so instead of inventing a name.
 | E12 | Global id never user-facing | pytest: `tests/adapters/inbound/test_telegram_bot.py::test_no_global_id_in_any_user_facing_text` · behave: `features/delete.feature::Scenario: A person cannot address another person's expense` (reply text pinned exactly) · Task 11 reds `tests/adapters/inbound/test_cli_extraction.py` on captured stdout but names no test, so there is no verbatim name to map · invariant greps: `rtk grep "Expense #" src`, `rtk grep "expense_id" src/expense_report/adapters/inbound` (no matches)
 | E13 | Key computed inside the INSERT; UNIQUE backstop | pytest: `tests/adapters/out/test_sqlite_repository.py::test_save_rejects_a_key_clash_via_unique_index` (spelling verbatim from the plan) · `tests/adapters/out/test_sqlite_repository.py::test_save_allows_two_rows_with_null_user_key` · `tests/adapters/out/test_sqlite_repository.py::test_save_assigns_user_key_from_expense_date` · `tests/adapters/out/test_sqlite_repository.py::test_save_returns_the_assigned_key` · Task 3 updates four changeset-count assertions in `tests/migrations/test_changelog.py` (3 sites) and `scripts/upgrade-probe/verify.py` (1 site) — the plan names files and sites, no test names · invariant grep: `rtk grep "INSERT OR REPLACE" src` (no matches)
 | E14 | ADR 0011 invariants preserved | pytest: `tests/adapters/out/test_sqlite_repository.py::test_delete_by_user_key_soft_deletes_row_retained` · `tests/ports/test_repository.py::test_protocol_compliance` · `tests/domain/test_models.py::test_user_key_is_frozen` · invariant greps: `rtk grep "DELETE FROM" src` (no matches), `rtk grep "delete_by_id" src` (no matches)
+| E15 | Legacy rows gain a valid key at migration time | pytest (integration): `tests/migrations/test_changelog.py::test_backfill_assigns_dense_keys_in_insertion_order` · cross-version probe: `scripts/upgrade-probe/verify.py` (backfilled keys asserted over the real v0.7.0 upgrade) |
+| E16 | Backfilled numbering is dense, so future inserts never collide | pytest (integration): `tests/migrations/test_changelog.py::test_backfill_numbers_soft_deleted_rows_and_preserves_them` |
+| E17 | The backfill preserves rows and is idempotent | pytest (integration): `tests/migrations/test_changelog.py::test_backfill_is_idempotent` |

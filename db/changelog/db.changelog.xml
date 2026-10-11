@@ -41,4 +41,27 @@
         <sql>ALTER TABLE expenses_new RENAME TO expenses;</sql>
     </changeSet>
 
+    <!-- ADR 0020: existing Expenses copied in by 003 carry a NULL user_key.
+         Number them densely 1..N per (user_id, date) in insertion order, with the
+         prefix taken from each row's own date. Dense numbering matches save()'s
+         COUNT(id) + 1 so the next insert is always free; soft-deleted rows are
+         counted (ADR 0011). Only NULL keys are written, so a fresh or already-
+         backfilled database is untouched. Liquibase tracking gives exactly-once. -->
+    <changeSet id="004-backfill-user-key" author="expense-report">
+        <sql>
+            UPDATE expenses
+            SET user_key = (
+                SELECT substr(ranked.date, 1, 4) || substr(ranked.date, 6, 2) || substr(ranked.date, 9, 2) || '-' || ranked.n
+                FROM (
+                    SELECT id, date,
+                        ROW_NUMBER() OVER (PARTITION BY user_id, date ORDER BY id) AS n
+                    FROM expenses
+                    WHERE user_key IS NULL
+                ) AS ranked
+                WHERE ranked.id = expenses.id
+            )
+            WHERE user_key IS NULL;
+        </sql>
+    </changeSet>
+
 </databaseChangeLog>
