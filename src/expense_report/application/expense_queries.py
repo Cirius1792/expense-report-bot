@@ -94,7 +94,11 @@ class ExpenseQueryUseCase:
     # Deletion
     # ------------------------------------------------------------------
 
-    def delete_expense(self, user_id: int, expense_id: int) -> DeletionResult:
-        """Delete a single expense and return the result."""
-        deleted = self._repo.delete_by_id(user_id, expense_id)
+    def delete_expense(self, user_id: int, key: str) -> DeletionResult:
+        """Delete a single expense addressed by its per-person key.
+
+        The key is validated by the inbound adapter and resolved by the driven
+        repository; this use case only delegates — no key logic, no validation.
+        """
+        deleted = self._repo.delete_by_user_key(user_id, key)
         return DeletionResult(deleted=deleted)
