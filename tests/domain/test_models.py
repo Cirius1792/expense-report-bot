@@ -14,10 +14,11 @@ class TestExpense:
     """Expense is a frozen dataclass — test creation and immutability."""
 
     def test_create_with_all_fields(self) -> None:
-        """Expense can be created with all fields populated."""
+        """Expense can be created with all fields populated, including user_key."""
         dt = datetime(2026, 7, 1, 12, 30, 0)
         exp = Expense(
             id=42,
+            user_key="20260718-2",
             amount=Decimal("42.50"),
             currency="EUR",
             merchant="Grocery Store",
@@ -28,6 +29,7 @@ class TestExpense:
             created_at=dt,
         )
         assert exp.id == 42
+        assert exp.user_key == "20260718-2"
         assert exp.amount == Decimal("42.50")
         assert exp.currency == "EUR"
         assert exp.merchant == "Grocery Store"
@@ -38,10 +40,11 @@ class TestExpense:
         assert exp.created_at == dt
 
     def test_create_with_nulls(self) -> None:
-        """Expense allows None for id, category, and receipt_photo_id."""
+        """Expense allows None for id, user_key, category, and receipt_photo_id."""
         dt = datetime(2026, 7, 1, 12, 30, 0)
         exp = Expense(
             id=None,
+            user_key=None,
             amount=Decimal("15.00"),
             currency="USD",
             merchant="Coffee Shop",
@@ -52,14 +55,32 @@ class TestExpense:
             created_at=dt,
         )
         assert exp.id is None
+        assert exp.user_key is None
         assert exp.category is None
         assert exp.receipt_photo_id is None
+
+    def test_user_key_defaults_to_none_for_unpersisted_expense(self) -> None:
+        """An Expense built the way _build_expense builds one (never saved) has user_key None."""
+        exp = Expense(
+            id=None,
+            user_key=None,
+            amount=Decimal("15.00"),
+            currency="USD",
+            merchant="Coffee Shop",
+            date=date(2026, 7, 1),
+            category=None,
+            user_id=987654321,
+            receipt_photo_id=None,
+            created_at=datetime(2026, 7, 1, 12, 30, 0),
+        )
+        assert exp.user_key is None
 
     def test_is_frozen(self) -> None:
         """Expense instances cannot be mutated."""
         dt = datetime(2026, 7, 1, 12, 30, 0)
         exp = Expense(
             id=42,
+            user_key="20260718-1",
             amount=Decimal("10.00"),
             currency="EUR",
             merchant="Shop",
@@ -71,6 +92,23 @@ class TestExpense:
         )
         with pytest.raises(AttributeError):
             exp.amount = Decimal("20.00")  # type: ignore[misc]  # ty: ignore[invalid-assignment]
+
+    def test_user_key_is_frozen(self) -> None:
+        """user_key cannot be reassigned after construction."""
+        exp = Expense(
+            id=42,
+            user_key="20260718-1",
+            amount=Decimal("10.00"),
+            currency="EUR",
+            merchant="Shop",
+            date=date(2026, 7, 1),
+            category=None,
+            user_id=1,
+            receipt_photo_id=None,
+            created_at=datetime(2026, 7, 1, 12, 30, 0),
+        )
+        with pytest.raises(AttributeError):
+            exp.user_key = "20260718-2"  # type: ignore[misc]  # ty: ignore[invalid-assignment]
 
 
 class TestExtractionResult:
