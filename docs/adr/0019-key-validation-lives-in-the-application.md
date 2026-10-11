@@ -31,13 +31,14 @@ token is a legal key is domain policy, not transport translation.
   calls the predicate *before* delegating, and returns
   `DeletionResult(status="invalid_key")` without touching the repository.
 - **The port result carries the outcome.** `DeletionStatus = Literal["deleted",
-  "not_found", "invalid_key"]`; `DeletionResult` gains `status: DeletionStatus =
-  "not_found"` alongside `deleted`.
+  "not_found", "invalid_key"]`; `DeletionResult` gains `status: DeletionStatus`
+  (required — no default, so a construction cannot silently claim the wrong outcome)
+  alongside `deleted`.
 - **The adapter keeps no key logic.** `telegram_bot.py` loses `USER_KEY_PATTERN`,
   `_is_well_formed_key` and the `import re` that only served them. Both delete paths
-  extract a key from the wire payload, delegate once, and branch on `status`:
+  extract a key from the wire payload, delegate once, and branch on the result:
   `invalid_key` → `Usage: /delete <key>` (command) / warning + silent return (button);
-  `not_found` → the miss wording; `deleted` → the hit reply. The
+  no payload → the miss wording; payload → the hit reply. The
   `data.startswith("delete:")` guard stays in the adapter — that is wire-payload
   handling, not key logic.
 
@@ -55,9 +56,13 @@ token is a legal key is domain policy, not transport translation.
 
 - `DeletionResult` gains a field; the adapter branches on `status` only, never on
   key shape.
-- Existing test mocks that write `DeletionResult(deleted=...)` keep working
-  unchanged — `status` defaults to `"not_found"`, and those mocks are paired with
-  assertions that do not compare `status`.
+- Every construction site names `status` explicitly (3 in `src/`, 12 in tests); the
+  field has no default, so a new call site cannot omit the outcome and get a wrong
+  one silently. `DeletionResult(status="deleted")` with no `Expense` is a type error
+  at the call site rather than a runtime surprise.
+- The adapter reads `status` for the malformed case and the payload for miss/hit —
+  `if result.deleted is None` is the discriminator the type checker can verify, so
+  the hit branch never dereferences an `Expense | None`.
 - The adapter can no longer reject a malformed key without a port call, so the
   port is now exercised by the malformed-key tests: they assert
   `delete_expense.assert_called_once_with(user_id, key)` and a
@@ -67,8 +72,24 @@ token is a legal key is domain policy, not transport translation.
   `Expense <key> was not found.`, `Expense not found.` (the button-path miss wording
   stays as ruled in **R10** — this ADR does not invent a new one), and the hit reply.
 - Behave stays green without touching `features/delete.feature` or
-  `features/steps/delete_steps.py`: the invalid-command table drives the real
-  `ExpenseQueryUseCase`, which now rejects the keys itself.
+  `features/steps/delete_steps.py`: the invalid-command table still gets
+  `Usage: /delete <key>`. Behave cannot tell *where* the check runs — the pytest
+  pair below does.
+
+## Evidence
+
+- `tests/domain/test_expense_keys.py` pins the predicate directly (8 tests, no fixture).
+- `TestDeleteExpense::test_delete_expense_rejects_malformed_key_without_touching_repository`
+  pins that the use case rejects before the repository is reached.
+- `TestDeleteHandler::test_delete_handler_malformed_key_replies_usage_from_status` and
+  `TestDeleteCallbackHandler::test_delete_callback_malformed_payload_logs_warning_and_ignores`
+  pin that the adapter **delegates** for malformed keys (it holds no check of its own).
+- Mutation proof (scratch copy of HEAD, `/tmp/sdd-mut`): removing the use case's guard
+  fails `2 failed, 383 passed` — both `TestDeleteExpense::test_delete_expense_rejects_malformed_key_without_touching_repository` cases. Adding an
+  adapter short-circuit for malformed keys on top of that fails `5 failed, 380 passed`
+  — the three `test_delete_handler_malformed_key_replies_usage_from_status` cases assert
+  the adapter **delegates**. Behave stays green under both mutations: the BDD pins the
+  wording, the pytest pair pins the location.
 
 ## Out of scope
 
