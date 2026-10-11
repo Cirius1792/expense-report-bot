@@ -7,6 +7,7 @@ Uses dependency injection for ExpenseRecordingPort and ExpenseRepositoryPort.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from decimal import Decimal
@@ -132,8 +133,8 @@ ADD_EXPENSE_PROMPT = (
 )
 
 REMOVE_EXPENSE_PROMPT = (
-    "To remove an expense, use /delete <expense_id> — you'll find each"
-    " expense ID in the /list view. You can also tap the 🗑️ Delete button"
+    "To remove an expense, use /delete <key> — you'll find each"
+    " expense key in the /list view. You can also tap the 🗑️ Delete button"
     " under a freshly recorded expense."
 )
 
@@ -181,6 +182,24 @@ _FULL_MONTH_NAMES: dict[int, str] = {
 }
 
 
+# Per-person expense key (`YYYYMMDD-n`, ADR 0016) — the only thing a user ever
+# sees or types. The shape regex is not enough on its own: `20261340-1` matches
+# it but is not a calendar date, so the 8 digits are parsed as well.
+USER_KEY_PATTERN = re.compile(r"^\d{8}-\d+$")
+
+
+def _is_well_formed_key(key: str) -> bool:
+    """True when key is a per-person expense key: `YYYYMMDD-n` with a real date."""
+    if USER_KEY_PATTERN.fullmatch(key) is None:
+        return False
+    digits, _, _number = key.partition("-")
+    try:
+        datetime.strptime(digits, "%Y%m%d")
+    except ValueError:
+        return False
+    return True
+
+
 def _format_month_view(expenses: list[Expense], year: int, month: int) -> str:
     """Format a list of expenses as a month-view message text."""
     month_name = _FULL_MONTH_NAMES.get(month, str(month))
@@ -193,7 +212,7 @@ def _format_month_view(expenses: list[Expense], year: int, month: int) -> str:
     totals_by_currency: dict[str, Decimal] = {}
     for e in expenses:
         lines.append(
-            f"#{e.id:<4} {e.date}  {e.merchant:<20}"
+            f"#{(e.user_key or '-'):<10} {e.date}  {e.merchant:<20}"
             f" {e.amount:>8.2f} {e.currency:<4} {e.category or ''}"
         )
         totals_by_currency[e.currency] = (
@@ -354,7 +373,7 @@ def _make_list_callback_handler(expense_queries: ExpenseQueryPort):
 def _make_delete_callback_handler(expense_queries: ExpenseQueryPort):
     """Factory: create a callback handler for delete button presses.
 
-    Handles callback data of the form 'delete:<expense_id>'.
+    Handles callback data of the form ``delete:<user_key>``.
     """
 
     async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -369,15 +388,14 @@ def _make_delete_callback_handler(expense_queries: ExpenseQueryPort):
             return
 
         user_id = query.from_user.id
-        try:
-            expense_id = int(data.split(":", 1)[1])
-        except (ValueError, IndexError):
+        key = data.split(":", 1)[1]
+        if not _is_well_formed_key(key):
             logger.warning("Invalid delete callback_data from user %s: %r", user_id, data)
             return
 
-        logger.info("User %s tapped delete for expense #%s", user_id, expense_id)
+        logger.info("User %s tapped delete for key %s", user_id, key)
 
-        result = expense_queries.delete_expense(user_id, expense_id)
+        result = expense_queries.delete_expense(user_id, key)
 
         if result.deleted is None:
             await query.answer("Expense not found.")
@@ -416,31 +434,25 @@ def _make_delete_handler(expense_queries: ExpenseQueryPort):
 
         parts = text.split(maxsplit=1)
         if len(parts) != 2:
-            await update.effective_message.reply_text("Usage: /delete <expense_id>")
+            await update.effective_message.reply_text("Usage: /delete <key>")
             return
 
-        id_str = parts[1].strip()
+        key = parts[1].strip()
 
-        try:
-            expense_id = int(id_str)
-        except ValueError:
-            await update.effective_message.reply_text("Usage: /delete <expense_id>")
+        if not _is_well_formed_key(key):
+            await update.effective_message.reply_text("Usage: /delete <key>")
             return
 
-        if expense_id <= 0:
-            await update.effective_message.reply_text("Usage: /delete <expense_id>")
-            return
+        logger.info("User %s requesting deletion of key %s", user_id, key)
 
-        logger.info("User %s requesting deletion of expense #%s", user_id, expense_id)
-
-        result = expense_queries.delete_expense(user_id, expense_id)
+        result = expense_queries.delete_expense(user_id, key)
 
         if result.deleted is None:
-            await update.effective_message.reply_text(f"Expense #{expense_id} was not found.")
+            await update.effective_message.reply_text(f"Expense {key} was not found.")
         else:
             deleted = result.deleted
             await update.effective_message.reply_text(
-                f"🗑️ Deleted expense #{deleted.id}:"
+                f"🗑️ Deleted expense {deleted.user_key}:"
                 f" {deleted.merchant} — {deleted.amount:.2f} {deleted.currency}"
                 f" — {deleted.date}"
             )
@@ -821,10 +833,15 @@ async def _reply_with_recorded_expense(
 
     result = outcome.extraction
     saved_expense = outcome.expense
-    logger.info("Saved expense %s for user %s", saved_expense.id, update.effective_user.id)
+    logger.info(
+        "Saved expense %s (key %s) for user %s",
+        saved_expense.id,
+        saved_expense.user_key,
+        update.effective_user.id,
+    )
     summary = (
         f"📄 *Extracted expense:*\n"
-        f"Expense #{saved_expense.id}\n"
+        f"Expense {saved_expense.user_key}\n"
         f"Amount: {result.amount} {result.currency}\n"
         f"Merchant: {result.merchant}\n"
         f"Date: {result.date}\n"
@@ -832,7 +849,7 @@ async def _reply_with_recorded_expense(
         f"✅ Saved."
     )
     keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("🗑️ Delete", callback_data=f"delete:{saved_expense.id}")]]
+        [[InlineKeyboardButton("🗑️ Delete", callback_data=f"delete:{saved_expense.user_key}")]]
     )
     await update.effective_message.reply_text(summary, reply_markup=keyboard)
     # The Bot API allows at most one reply_markup per message, so the
@@ -850,10 +867,15 @@ async def _reply_with_resolved_correction(
 
     result = outcome.extraction
     saved_expense = outcome.expense
-    logger.info("Saved expense %s for user %s", saved_expense.id, update.effective_user.id)
+    logger.info(
+        "Saved expense %s (key %s) for user %s",
+        saved_expense.id,
+        saved_expense.user_key,
+        update.effective_user.id,
+    )
     summary = (
         f"📄 *Updated expense:*\n"
-        f"Expense #{saved_expense.id}\n"
+        f"Expense {saved_expense.user_key}\n"
         f"Amount: {result.amount} {result.currency}\n"
         f"Merchant: {result.merchant}\n"
         f"Date: {result.date}\n"
@@ -861,7 +883,7 @@ async def _reply_with_resolved_correction(
         f"✅ Updated and saved."
     )
     keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("🗑️ Delete", callback_data=f"delete:{saved_expense.id}")]]
+        [[InlineKeyboardButton("🗑️ Delete", callback_data=f"delete:{saved_expense.user_key}")]]
     )
     await update.effective_message.reply_text(summary, reply_markup=keyboard)
     # The Bot API allows at most one reply_markup per message, so the
