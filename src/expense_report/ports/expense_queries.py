@@ -28,7 +28,7 @@ DeletionStatus = Literal["deleted", "not_found", "invalid_key"]
 class DeletionResult:
     """Result of an expense deletion attempt."""
 
-    status: DeletionStatus = "not_found"
+    status: DeletionStatus
     deleted: Expense | None = None
 
 
