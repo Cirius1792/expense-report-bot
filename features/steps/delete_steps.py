@@ -34,6 +34,35 @@ def step_delete_user_command(context: Any, user_id: int, command: str) -> None:
     context._last_delete_reply = update.effective_message.reply_text.call_args[0][0]
 
 
+@when("user {user_id:d} records the following expense:")
+def step_user_records_expense(context: Any, user_id: int) -> None:
+    """Record one more expense for that person through the repository's save().
+
+    Same call the recording path makes: `id=None`, so the key is assigned inside
+    the INSERT (E13) and read back from the row. Hand-writing a key here would
+    pin the wording of the scenario without pinning the counter it is about.
+    """
+    from datetime import date, datetime
+    from decimal import Decimal
+
+    from expense_report.domain.models import Expense
+
+    for row in context.table:
+        expense = Expense(
+            id=None,
+            user_key=None,
+            amount=Decimal(row["amount"]),
+            currency=row["currency"],
+            merchant=row["merchant"],
+            date=date.fromisoformat(row["date"]),
+            category=row.get("category"),
+            user_id=user_id,
+            receipt_photo_id=None,
+            created_at=datetime.fromisoformat(f"{row['date']}T12:00:00"),
+        )
+        context._last_saved_expense = context.repository.save(expense)
+
+
 @when("I send invalid delete commands:")
 def step_send_invalid_delete_commands(context: Any) -> None:
     """Send each invalid delete command and collect replies."""
@@ -163,6 +192,20 @@ def step_expense_still_recorded(context: Any, expense_key: str, user_id: int) ->
     assert matches, f"Expected expense {expense_key} to still exist for user {user_id}"
     owners = {expense.user_id for expense in matches}
     assert owners == {user_id}, f"Expected owner {user_id}, got {sorted(owners)}"
+
+
+@then('the newly recorded expense should have key "{expense_key}"')
+def step_newly_recorded_key(context: Any, expense_key: str) -> None:
+    """The key that the last save() assigned, as stored in the row.
+
+    Pins E10: a soft delete frees a key number, and the next expense on that
+    date must not be handed it again.
+    """
+    saved = getattr(context, "_last_saved_expense", None)
+    assert saved is not None, "No expense was recorded by this scenario"
+    assert saved.user_key == expense_key, (
+        f"Expected the new expense to be keyed '{expense_key}', got '{saved.user_key}'"
+    )
 
 
 @then('each delete command should reply with "{expected}"')
