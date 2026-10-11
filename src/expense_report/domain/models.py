@@ -12,9 +12,14 @@ from decimal import Decimal
 
 @dataclass(frozen=True)
 class Expense:
-    """A structured record of money spent, extracted from a Receipt."""
+    """A structured record of money spent, extracted from a Receipt.
+
+    ``user_key`` is the per-person key assigned by the repository at save time;
+    ``None`` means not persisted / pre-backfill row.
+    """
 
     id: int | None
+    user_key: str | None
     amount: Decimal
     currency: str
     merchant: str
