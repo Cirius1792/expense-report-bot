@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections import Counter
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -17,6 +18,10 @@ def step_seed_expenses_from_table(context: Any) -> None:
     """Seed multiple expenses from a Gherkin data table.
 
     Supports optional user_id column for multi-user scenarios.
+
+    There is no `id` column: seeding an explicit id would take the test-only
+    branch of save() and hand back a key-less row. Fixtures never hand-write
+    keys (ADR 0016) — every row acquires its genuine `YYYYMMDD-n` through save.
     """
     from datetime import date, datetime
     from decimal import Decimal
@@ -25,9 +30,9 @@ def step_seed_expenses_from_table(context: Any) -> None:
 
     for row in context.table:
         user_id = int(row.get("user_id", context.user_id))
-        id_val = row.get("id")
         expense = Expense(
-            id=int(id_val) if id_val else None,
+            id=None,
+            user_key=None,
             amount=Decimal(row["amount"]),
             currency=row["currency"],
             merchant=row["merchant"],
@@ -154,11 +159,44 @@ def step_message_updates_month(context: Any, month_name: str, year: int) -> None
     assert str(year) in text, f"Expected '{year}' in updated message, got: {text[:200]}"
 
 
-@then('the message lists expense "{expense_ref}" for merchant "{merchant}"')
-def step_message_lists_expense_id(context: Any, expense_ref: str, merchant: str) -> None:
+@then('the message lists expense "{expense_key}" for merchant "{merchant}"')
+def step_message_lists_expense_key(context: Any, expense_key: str, merchant: str) -> None:
+    """Assert the key sits on the same row line as that merchant.
+
+    Row-scoped, not "both somewhere in the text": a key from another person's
+    row must never satisfy this assertion (E11/E13).
+    """
     text = context._list_message_text
-    assert expense_ref in text, f"Expected '{expense_ref}' in message, got: {text[:200]}"
-    assert merchant in text, f"Expected '{merchant}' in message, got: {text[:200]}"
+    rows = _expense_row_lines(text)
+    owned = [line for line in rows if merchant in line]
+    assert owned, f"No expense row for merchant '{merchant}' in message: {text[:300]}"
+    for line in owned:
+        assert expense_key in line, (
+            f"Expected the key cell '{expense_key}' on the row for '{merchant}', got row: {line!r}"
+        )
+
+
+@then("the listing shows a key for every expense row")
+def step_listing_keys_every_row(context: Any) -> None:
+    """Every rendered row carries a well-formed key coherent with its date.
+
+    Counts rows against keys in the message text: a row rendered with the `-`
+    placeholder, or with a key whose prefix is not the row's own date (E7),
+    fails here.
+    """
+    text = context._list_message_text
+    rows = _expense_row_lines(text)
+    assert rows, "Expected at least one expense row in the listing"
+    unkeyed = [line for line in rows if _row_key(line) is None]
+    assert not unkeyed, (
+        "Rows without a key "
+        f"({len(rows) - len(unkeyed)}/{len(rows)} keyed): "
+        f"{[repr(line) for line in unkeyed]}"
+    )
+    incoherent = [line for line in rows if not _key_matches_row_date(_row_key(line) or "", line)]
+    assert not incoherent, (
+        f"Rows whose key prefix is not their own date: {[repr(line) for line in incoherent]}"
+    )
 
 
 @then('the message shows the total "{total}"')
@@ -282,6 +320,27 @@ def _make_callback_query_update(context: Any, callback_data: str) -> MagicMock:
     query.edit_message_text = AsyncMock()
     update.callback_query = query
     return update
+
+
+def _expense_row_lines(text: str) -> list[str]:
+    """Month-view row lines, identified by the leading `#` key marker.
+
+    Headers start with the chart emoji, the total line with `Total:`, the
+    explanation with `Only months` — only expense rows start with `#`.
+    """
+    return [line for line in text.splitlines() if line.startswith("#")]
+
+
+def _row_key(line: str) -> str | None:
+    """The `YYYYMMDD-n` key a row line renders, or None when it renders `-`."""
+    match = re.match(r"#(?P<key>\d{8}-\d+) ", line)
+    return match.group("key") if match else None
+
+
+def _key_matches_row_date(key: str, line: str) -> bool:
+    """True when the key's 8-digit prefix is the date printed on that row (E7)."""
+    dates = re.findall(r"\d{4}-\d{2}-\d{2}", line)
+    return any(key.partition("-")[0] == date_digits.replace("-", "") for date_digits in dates)
 
 
 def _get_all_button_labels(markup: Any) -> list[str]:
