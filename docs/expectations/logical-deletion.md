@@ -70,9 +70,9 @@ port.
 ### Happy path
 
 - [ ] Saving a new expense leaves `deleted_at` as `None`.
-- [ ] `/delete <id>` soft-deletes the expense: the row remains in the table with
-      `deleted_at` set, and the user still sees the success message
-      `🗑️ Deleted expense #<id>: <merchant> — <amount> <currency> — <date>`.
+- [ ] `/delete <key>` soft-deletes the expense (ADR 0016 cutover — the per-person key, no leading
+      `#`): the row remains in the table with `deleted_at` set, and the user still sees the success
+      message `🗑️ Deleted expense <key>: <merchant> — <amount> <currency> — <date>`.
 - [ ] The soft-deleted expense disappears from `/list` and `/report` and from the
       CSV report without any listing-code change.
 - [ ] `/list` totals and month discovery exclude soft-deleted expenses.
