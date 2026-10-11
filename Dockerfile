@@ -18,6 +18,12 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 # the non-root runtime user ("Permission denied" when launching the bot).
 ENV UV_PYTHON_INSTALL_DIR=/opt/python
 
+# Pin the interpreter to the project's floor (pyproject requires-python >=3.12).
+# Without this uv picks the newest managed CPython (3.15), whose wheel set is
+# incomplete: `xxhash` (via dspy) has no cp315 wheel, so uv source-builds it and
+# fails because the Liquibase base image ships no C compiler.
+ENV UV_PYTHON=3.12
+
 WORKDIR /app
 
 # First layer: dependencies only (cached unless pyproject.toml/uv.lock change)
