@@ -202,6 +202,7 @@ def seed_expense(
     user_id = user_id or context.user_id
     expense = Expense(
         id=None,
+        user_key=None,
         amount=Decimal(amount),
         currency=currency,
         merchant=merchant,
