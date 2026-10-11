@@ -7,7 +7,6 @@ Uses dependency injection for ExpenseRecordingPort and ExpenseRepositoryPort.
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from decimal import Decimal
@@ -180,24 +179,6 @@ _FULL_MONTH_NAMES: dict[int, str] = {
     11: "November",
     12: "December",
 }
-
-
-# Per-person expense key (`YYYYMMDD-n`, ADR 0016) — the only thing a user ever
-# sees or types. The shape regex is not enough on its own: `20261340-1` matches
-# it but is not a calendar date, so the 8 digits are parsed as well.
-USER_KEY_PATTERN = re.compile(r"^\d{8}-\d+$")
-
-
-def _is_well_formed_key(key: str) -> bool:
-    """True when key is a per-person expense key: `YYYYMMDD-n` with a real date."""
-    if USER_KEY_PATTERN.fullmatch(key) is None:
-        return False
-    digits, _, _number = key.partition("-")
-    try:
-        datetime.strptime(digits, "%Y%m%d")
-    except ValueError:
-        return False
-    return True
 
 
 def _format_month_view(expenses: list[Expense], year: int, month: int) -> str:
@@ -389,13 +370,15 @@ def _make_delete_callback_handler(expense_queries: ExpenseQueryPort):
 
         user_id = query.from_user.id
         key = data.split(":", 1)[1]
-        if not _is_well_formed_key(key):
+
+        result = expense_queries.delete_expense(user_id, key)
+
+        if result.status == "invalid_key":
             logger.warning("Invalid delete callback_data from user %s: %r", user_id, data)
+            await query.answer("Expense not found.")
             return
 
         logger.info("User %s tapped delete for key %s", user_id, key)
-
-        result = expense_queries.delete_expense(user_id, key)
 
         if result.deleted is None:
             await query.answer("Expense not found.")
@@ -439,13 +422,13 @@ def _make_delete_handler(expense_queries: ExpenseQueryPort):
 
         key = parts[1].strip()
 
-        if not _is_well_formed_key(key):
+        result = expense_queries.delete_expense(user_id, key)
+
+        if result.status == "invalid_key":
             await update.effective_message.reply_text("Usage: /delete <key>")
             return
 
         logger.info("User %s requesting deletion of key %s", user_id, key)
-
-        result = expense_queries.delete_expense(user_id, key)
 
         if result.deleted is None:
             await update.effective_message.reply_text(f"Expense {key} was not found.")

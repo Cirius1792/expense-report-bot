@@ -14,7 +14,7 @@ from decimal import Decimal
 class Expense:
     """A structured record of money spent, extracted from a Receipt.
 
-    ``user_key`` is the per-person key assigned by the repository at save time;
+    ``user_key`` is the per-person key assigned to each expense;
     ``None`` means not persisted / pre-backfill row.
     """
 
