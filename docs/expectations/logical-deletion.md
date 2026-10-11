@@ -95,6 +95,12 @@ port.
 
 ## Evidence mapping
 
+> **Note (2026-10-11):** this table is the as-executed record at that feature's HEAD. Two later
+> decisions renamed things cited here: ADR 0013 (Liquibase owns the schema) moved the schema-migration
+> evidence to `tests/migrations/`, and ADR 0016 renamed `delete_by_id` → `delete_by_user_key`. The
+> rows below name the **current** tests; rows whose names were renamed by other branches are left as
+> they were recorded (see `git log -S <name>` if a name has no hit).
+
 | Expectation | Test location |
 |---|---|
 | deleted_at persisted as None on save | `tests/adapters/out/test_sqlite_repository.py::TestLogicalDeletion::test_save_leaves_deleted_at_none` |
@@ -103,6 +109,6 @@ port.
 | user scoping preserved on delete | `tests/adapters/out/test_sqlite_repository.py::TestDeleteByUserKey::test_delete_by_user_key_scoped_to_user` |
 | already-deleted delete returns not-found | `tests/adapters/out/test_sqlite_repository.py::TestLogicalDeletion::test_delete_already_deleted_returns_none` |
 | application layer unchanged | `tests/application/test_expense_queries.py` (all passing, no edits) |
-| schema migration | `tests/adapters/out/test_sqlite_repository.py::TestSchemaMigration::test_existing_db_without_deleted_at_migrates` |
+| schema migration | `tests/migrations/test_changelog.py::test_legacy_database_gains_deleted_at_without_losing_rows` (renamed from `TestSchemaMigration::test_existing_db_without_deleted_at_migrates` by ADR 0013) |
 | no `DELETE FROM expenses` remains | `grep -rn "DELETE FROM" src tests` → no matches |
 | user-scoped key counts soft-deleted rows | deferred to issue #16 / ADR 0016 (key-count INSERT does not exist yet) — proven by E10 in `docs/expectations/user-scoped-expense-keys.md` |
