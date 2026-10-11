@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from expense_report.domain.csv_generator import generate_csv as _generate_csv
+from expense_report.domain.expense_keys import is_valid_expense_key
 from expense_report.domain.models import Expense
 from expense_report.ports.expense_queries import DeletionResult, PeriodSummary
 from expense_report.ports.repository import ExpenseRepositoryPort
@@ -97,8 +98,12 @@ class ExpenseQueryUseCase:
     def delete_expense(self, user_id: int, key: str) -> DeletionResult:
         """Delete a single expense addressed by its per-person key.
 
-        The key is validated by the inbound adapter and resolved by the driven
-        repository; this use case only delegates — no key logic, no validation.
+        Returns DeletionResult whose ``status`` is one of: deleted, not_found, invalid_key.
         """
+        if not is_valid_expense_key(key):
+            return DeletionResult(status="invalid_key")
+
         deleted = self._repo.delete_by_user_key(user_id, key)
-        return DeletionResult(deleted=deleted)
+        if deleted is None:
+            return DeletionResult(status="not_found")
+        return DeletionResult(status="deleted", deleted=deleted)

@@ -1020,14 +1020,16 @@ class TestSaveConfirmation:
 
         # /delete miss reply (well-formed key, nothing deleted)
         queries = _make_queries_mock()
-        queries.delete_expense.return_value = DeletionResult(deleted=None)
+        queries.delete_expense.return_value = DeletionResult(status="not_found")
         miss_update = _make_update(text="/delete 20260712-1")
         asyncio.run(_make_delete_handler(queries)(miss_update, MagicMock()))
         _assert_no_global_id([miss_update.effective_message.reply_text.call_args[0][0]], global_id)
 
         # /delete hit reply (echoes the deleted expense)
         queries = _make_queries_mock()
-        queries.delete_expense.return_value = DeletionResult(deleted=saved_expense)
+        queries.delete_expense.return_value = DeletionResult(
+            status="deleted", deleted=saved_expense
+        )
         hit_update = _make_update(text="/delete 20260712-1")
         asyncio.run(_make_delete_handler(queries)(hit_update, MagicMock()))
         _assert_no_global_id([hit_update.effective_message.reply_text.call_args[0][0]], global_id)
@@ -1850,7 +1852,9 @@ class TestDeleteCallbackHandler:
             receipt_photo_id=None,
             created_at=datetime(2026, 7, 12, 12, 0, 0),
         )
-        mock_queries.delete_expense.return_value = DeletionResult(deleted=deleted_expense)
+        mock_queries.delete_expense.return_value = DeletionResult(
+            status="deleted", deleted=deleted_expense
+        )
 
         handler = _make_delete_callback_handler(mock_queries)
         update = MagicMock()
@@ -1891,7 +1895,7 @@ class TestDeleteCallbackHandler:
         from expense_report.adapters.inbound.telegram_bot import _make_delete_callback_handler
 
         mock_queries = _make_queries_mock()
-        mock_queries.delete_expense.return_value = DeletionResult(deleted=None)
+        mock_queries.delete_expense.return_value = DeletionResult(status="not_found")
 
         handler = _make_delete_callback_handler(mock_queries)
         update = MagicMock()
@@ -1923,13 +1927,14 @@ class TestDeleteCallbackHandler:
             "delete:20261340-1",
         ],
     )
-    def test_delete_callback_malformed_payload_logs_warning_and_ignores(
+    def test_delete_callback_malformed_payload_logs_warning_and_replies_not_found(
         self, payload: str, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """A malformed delete payload logs a warning and never reaches the port."""
+        """A malformed delete payload delegates; the adapter warns and replies the miss wording."""
         from expense_report.adapters.inbound.telegram_bot import _make_delete_callback_handler
 
         mock_queries = _make_queries_mock()
+        mock_queries.delete_expense.return_value = DeletionResult(status="invalid_key")
         handler = _make_delete_callback_handler(mock_queries)
 
         caplog.set_level(logging.WARNING)
@@ -1948,7 +1953,7 @@ class TestDeleteCallbackHandler:
 
         asyncio.run(handler(update, context))
 
-        mock_queries.delete_expense.assert_not_called()
+        mock_queries.delete_expense.assert_called_once_with(12345, payload.split(":", 1)[1])
         query.edit_message_text.assert_not_awaited()
 
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
@@ -1976,7 +1981,9 @@ class TestDeleteHandler:
             receipt_photo_id=None,
             created_at=datetime(2026, 7, 10, 12, 0, 0),
         )
-        mock_queries.delete_expense.return_value = DeletionResult(deleted=deleted_expense)
+        mock_queries.delete_expense.return_value = DeletionResult(
+            status="deleted", deleted=deleted_expense
+        )
 
         handler = _make_delete_handler(mock_queries)
         update = _make_update(text="/delete 20260710-1")
@@ -1994,7 +2001,7 @@ class TestDeleteHandler:
         from expense_report.adapters.inbound.telegram_bot import _make_delete_handler
 
         mock_queries = _make_queries_mock()
-        mock_queries.delete_expense.return_value = DeletionResult(deleted=None)
+        mock_queries.delete_expense.return_value = DeletionResult(status="not_found")
 
         handler = _make_delete_handler(mock_queries)
         update = _make_update(text="/delete 20260718-3")
@@ -2007,19 +2014,21 @@ class TestDeleteHandler:
         mock_queries.delete_expense.assert_called_once_with(12345, "20260718-3")
 
     @pytest.mark.parametrize(
-        "command",
+        "command,key",
         [
-            "/delete abc",
-            "/delete #20260718-1",
-            "/delete -1",
-            "/delete ",
+            ("/delete abc", "abc"),
+            ("/delete #20260718-1", "#20260718-1"),
+            ("/delete -1", "-1"),
         ],
     )
-    def test_delete_handler_malformed_token_replies_usage(self, command: str) -> None:
-        """Malformed key argument replies with the usage message."""
+    def test_delete_handler_malformed_key_replies_usage_from_status(
+        self, command: str, key: str
+    ) -> None:
+        """A malformed key argument delegates; the usage reply comes from status."""
         from expense_report.adapters.inbound.telegram_bot import _make_delete_handler
 
         mock_queries = _make_queries_mock()
+        mock_queries.delete_expense.return_value = DeletionResult(status="invalid_key")
         handler = _make_delete_handler(mock_queries)
 
         update = _make_update(text=command)
@@ -2028,16 +2037,32 @@ class TestDeleteHandler:
 
         reply = update.effective_message.reply_text.call_args[0][0]
         assert reply == "Usage: /delete <key>"
-        mock_queries.delete_expense.assert_not_called()
+        mock_queries.delete_expense.assert_called_once_with(12345, key)
 
     def test_delete_handler_impossible_date_key_replies_usage(self) -> None:
-        """A regex-valid key whose 8 digits are not a real date is malformed."""
+        """A regex-valid key whose 8 digits are not a real date delegates and is rejected."""
+        from expense_report.adapters.inbound.telegram_bot import _make_delete_handler
+
+        mock_queries = _make_queries_mock()
+        mock_queries.delete_expense.return_value = DeletionResult(status="invalid_key")
+        handler = _make_delete_handler(mock_queries)
+
+        update = _make_update(text="/delete 20261340-1")
+        context = MagicMock()
+        asyncio.run(handler(update, context))
+
+        reply = update.effective_message.reply_text.call_args[0][0]
+        assert reply == "Usage: /delete <key>"
+        mock_queries.delete_expense.assert_called_once_with(12345, "20261340-1")
+
+    def test_delete_handler_blank_argument_replies_usage_without_calling_the_port(self) -> None:
+        """A trailing-space argument yields no second token, so the port is never called."""
         from expense_report.adapters.inbound.telegram_bot import _make_delete_handler
 
         mock_queries = _make_queries_mock()
         handler = _make_delete_handler(mock_queries)
 
-        update = _make_update(text="/delete 20261340-1")
+        update = _make_update(text="/delete ")
         context = MagicMock()
         asyncio.run(handler(update, context))
 

@@ -22,6 +22,7 @@
 3. **/delete invalid formats show usage.**
    - `/delete`, `/delete abc`, `/delete 20260718-3 extra`, `/delete 0`, `/delete #20260712-1` (leading `#` is **not** accepted), `/delete 20261340-1` (regex-valid, calendar-invalid) all reply: `Usage: /delete <key>`.
    - Key shape is `^\d{8}-\d+$` **plus** a real-calendar check on the 8 digits.
+   - Key validation is **application policy** (ADR 0019): `ExpenseQueryUseCase.delete_expense` returns `DeletionResult(status="invalid_key")` without touching the repository; the Telegram adapter renders from `status` and holds no key logic of its own.
 
 4. **User-scoped delete: not-found for wrong user.**
    - User A's `/delete <key>` targeting user B's expense returns `Expense <key> was not found.`
@@ -76,7 +77,8 @@
 | Per-person keys assigned | `test_save_returns_the_assigned_key` (pytest), delete.feature (behave) — E5 |
 | Keys visible in /list | `test_month_view_leads_each_row_with_key` + `test_month_view_renders_placeholder_for_missing_key` (pytest), list.feature key assertions (behave) — E2 |
 | /delete soft-deletes user-scoped | `TestDeleteHandler` tests (pytest), delete.feature (behave) — E4, E14 |
-| /delete invalid format usage | `test_delete_handler_malformed_token_replies_usage`, `test_delete_handler_impossible_date_key_replies_usage`, `test_delete_handler_no_argument_replies_usage` (pytest), delete.feature invalid-command table (behave) — E8 |
+| /delete invalid format usage | `test_delete_handler_malformed_key_replies_usage_from_status`, `test_delete_handler_impossible_date_key_replies_usage`, `test_delete_handler_blank_argument_replies_usage_without_calling_the_port`, `test_delete_handler_no_argument_replies_usage` (pytest), delete.feature invalid-command table (behave) — E8 |
+| invalid key rejected in the application layer | `test_delete_expense_rejects_malformed_key_without_touching_repository[20261340-1]` + `[abc]` (pytest) — `status="invalid_key"` and repository mock `assert_not_called` |
 | User-scoped not-found | `test_delete_by_user_key_returns_none_for_another_persons_key` (pytest), delete.feature (behave) — E9, E11 |
 | Save confirmations with key + button | `test_confirmation_line_shows_key_without_hash` + `test_delete_callback_payload_carries_key` (pytest), telegram_bot.feature + correction.feature (behave) — E1, E3 |
 | Delete button strikethrough edit | `TestDeleteCallbackHandler` (pytest), delete.feature @story-18 (behave) — E3 |

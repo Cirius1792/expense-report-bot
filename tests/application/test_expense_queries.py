@@ -6,6 +6,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock
 
+import pytest
+
 from expense_report.domain.models import Expense
 from expense_report.ports.expense_queries import DeletionResult, PeriodSummary
 
@@ -297,10 +299,10 @@ class TestDeleteExpense:
         result = use_case.delete_expense(12345, "20260718-3")
 
         repo.delete_by_user_key.assert_called_once_with(12345, "20260718-3")
-        assert result == DeletionResult(deleted=e1)
+        assert result == DeletionResult(status="deleted", deleted=e1)
 
     def test_not_found_returns_none_deleted(self) -> None:
-        """Returns DeletionResult(deleted=None) when not found."""
+        """Returns DeletionResult(status="not_found") when the key addresses no live row."""
         from expense_report.application.expense_queries import ExpenseQueryUseCase
 
         repo = MagicMock()
@@ -310,4 +312,25 @@ class TestDeleteExpense:
         result = use_case.delete_expense(12345, "20260718-3")
 
         repo.delete_by_user_key.assert_called_once_with(12345, "20260718-3")
-        assert result == DeletionResult(deleted=None)
+        assert result == DeletionResult(status="not_found", deleted=None)
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "20261340-1",  # regex-valid, calendar-invalid
+            "abc",  # shape-invalid
+        ],
+    )
+    def test_delete_expense_rejects_malformed_key_without_touching_repository(
+        self, key: str
+    ) -> None:
+        """A malformed key is rejected in the application: status invalid_key, repo untouched."""
+        from expense_report.application.expense_queries import ExpenseQueryUseCase
+
+        repo = MagicMock()
+        use_case = ExpenseQueryUseCase(repo)
+
+        result = use_case.delete_expense(12345, key)
+
+        assert result == DeletionResult(status="invalid_key")
+        repo.delete_by_user_key.assert_not_called()
