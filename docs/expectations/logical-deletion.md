@@ -82,7 +82,6 @@ port.
 
 - [ ] Every read method filters deleted rows by default.
 - [ ] A wrong-user `/delete` still returns "not found" (user scoping preserved).
-- [ ] A wrong-user `/delete` still returns "not found" (user scoping preserved).
 - [ ] Soft-deleting does not reuse the row's id or disturb sibling rows.
 - [ ] Existing databases migrate cleanly: pre-existing rows read as not-deleted.
 
