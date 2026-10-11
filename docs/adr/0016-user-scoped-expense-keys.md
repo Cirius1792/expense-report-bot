@@ -86,8 +86,9 @@ ids)" — a file that was never written. This ADR is that decision; nothing is r
   and the features switch together.
 - Stale expectation files (`delete-expenses.md`, `expense-query-policy.md`,
   `telegram-command-hints.md`) are rewritten to this behaviour.
-- `tests/migrations/test_changelog.py` and `scripts/upgrade-probe/verify.py` pin the applied
-  changeset count and move from 2 to 3 with `003-add-user-key`.
+- `tests/migrations/test_changelog.py` (three sites) and `scripts/upgrade-probe/verify.py` (one site)
+  pin the applied changeset count: **four** assertions in total, each moving from 2 to 3 with
+  `003-add-user-key`.
 
 ## Out of scope
 

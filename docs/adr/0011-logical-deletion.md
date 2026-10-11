@@ -47,8 +47,10 @@ Replace physical deletion with **logical deletion**:
 - `/delete`, the inline delete button, `/list`, `/report`, and CSV keep the same
   user-facing behavior — deleted rows simply disappear from listings.
 - No `DELETE FROM expenses` remains in the codebase.
-- `delete_by_id` signature is unchanged. Read methods filter deleted rows
+- `delete_by_id` signature is unchanged **by this ADR**. Read methods filter deleted rows
   unconditionally; there is no `include_deleted` parameter on the port.
+  (Superseded at ADR 0016's cutover: the method is replaced by `delete_by_user_key` — the rename
+  is ADR 0016's, and what survives it is this ADR's soft-delete semantics.)
 - ADR 0010 (user-scoped ids) now depends on this ADR being implemented first — ADR 0016 is
   the file that was actually written for that decision.
 - `Expense` construction sites (`_build_expense`, `_row_to_expense`, tests) must

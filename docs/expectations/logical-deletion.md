@@ -14,8 +14,10 @@
 Expenses are never physically removed from the `expenses` table. Instead each
 `Expense` gains a `deleted_at: datetime | None` field. A row with a non-null
 `deleted_at` is **logically deleted** and must be filtered out of every
-user-facing data access. Rows can still be retrieved on demand via an opt-in
-`include_deleted` flag on the port (used only by internal/audit paths).
+user-facing data access. No port surface exists to retrieve them: there is no `include_deleted`
+opt-in on the port or anywhere else in `src/` (ADR 0011 removed it as unused surface area), so
+deleted rows are reachable only by reading the database directly (tests/audit), never through the
+port.
 
 ## Design decisions (agreed)
 

@@ -81,4 +81,4 @@
 | Save confirmations with key + button | `test_save_confirmation_includes_key_and_delete_button` (pytest), telegram_bot.feature + correction.feature (behave) — E1, E3 |
 | Delete button strikethrough edit | `TestDeleteCallbackHandler` (pytest), delete.feature @story-18 (behave) — E3 |
 | CSV leads with user_key | `test_header_line` (pytest), report.feature (behave) — E6 |
-| Schema changeset 003-add-user-key | `tests/migrations/test_changelog.py` changeset count (pytest), `tests/_schema/expenses.sql` snapshot — E13 |
+| Schema changeset `003-add-user-key` lands the `user_key` column | `tests/migrations/test_changelog.py` changeset count (pytest), `tests/_schema/expenses.sql` snapshot — E1 |
