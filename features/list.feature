@@ -18,6 +18,7 @@ Feature: Monthly Expense List (Interactive)
     Then the message shows expenses for July 2026
     And the message lists expense "#20260710-1" for merchant "Supermarket"
     And the message lists expense "#20260710-2" for merchant "Coffee Shop"
+    # every row: a well-formed key cell, distinct from every other row's key, prefixed with that row's own date column, and as many rows as the "(N expenses)" claim
     And the listing shows a key for every expense row
     And the message shows the total "55.00"
     And the bot shows buttons labeled "2026", "Jul", and "Mar"
