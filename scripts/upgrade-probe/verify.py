@@ -16,7 +16,7 @@ def main() -> int:
 
     assert "deleted_at" in after["columns"], f"PR schema missing deleted_at: {after}"
     assert "databasechangelog" in after["tables"], f"Liquibase tracking table missing: {after}"
-    assert after["changesets"] == 2, f"expected 2 baseline changesets: {after}"
+    assert after["changesets"] == 3, f"expected 3 baseline changesets: {after}"
     assert after["rows"] == before["rows"], "migration changed or lost expense rows"
     print("PASS: legacy rows preserved, deleted_at added, Liquibase baselined")
     return 0
