@@ -74,11 +74,11 @@
 | Expectation | Evidence |
 |-------------|----------|
 | Per-person keys assigned | `test_save_returns_the_assigned_key` (pytest), delete.feature (behave) — E5 |
-| Keys visible in /list | `test_format_month_view_includes_expense_keys` (pytest), list.feature key assertions (behave) — E2 |
+| Keys visible in /list | `test_month_view_leads_each_row_with_key` + `test_month_view_renders_placeholder_for_missing_key` (pytest), list.feature key assertions (behave) — E2 |
 | /delete soft-deletes user-scoped | `TestDeleteHandler` tests (pytest), delete.feature (behave) — E4, E14 |
-| /delete invalid format usage | `test_delete_invalid_format_returns_usage` (pytest), delete.feature invalid-command table (behave) — E8 |
+| /delete invalid format usage | `test_delete_handler_malformed_token_replies_usage`, `test_delete_handler_impossible_date_key_replies_usage`, `test_delete_handler_no_argument_replies_usage` (pytest), delete.feature invalid-command table (behave) — E8 |
 | User-scoped not-found | `test_delete_by_user_key_returns_none_for_another_persons_key` (pytest), delete.feature (behave) — E9, E11 |
-| Save confirmations with key + button | `test_save_confirmation_includes_key_and_delete_button` (pytest), telegram_bot.feature + correction.feature (behave) — E1, E3 |
+| Save confirmations with key + button | `test_confirmation_line_shows_key_without_hash` + `test_delete_callback_payload_carries_key` (pytest), telegram_bot.feature + correction.feature (behave) — E1, E3 |
 | Delete button strikethrough edit | `TestDeleteCallbackHandler` (pytest), delete.feature @story-18 (behave) — E3 |
 | CSV leads with user_key | `test_header_line` (pytest), report.feature (behave) — E6 |
 | Schema changeset `003-add-user-key` lands the `user_key` column | `tests/migrations/test_changelog.py` changeset count (pytest), `tests/_schema/expenses.sql` snapshot — E1 |
