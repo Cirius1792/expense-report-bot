@@ -375,7 +375,6 @@ def _make_delete_callback_handler(expense_queries: ExpenseQueryPort):
 
         if result.status == "invalid_key":
             logger.warning("Invalid delete callback_data from user %s: %r", user_id, data)
-            await query.answer("Expense not found.")
             return
 
         logger.info("User %s tapped delete for key %s", user_id, key)
