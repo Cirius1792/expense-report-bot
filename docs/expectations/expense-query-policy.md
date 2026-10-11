@@ -65,7 +65,8 @@ class ExpenseQueryPort(Protocol):
 ### 3. Year Expenses (`get_year_expenses`)
 - Aggregates expenses across all months of the given year
 - Returns empty list if no expenses
-- Sort order: by month then by expense ID (consistent with current behavior)
+- Sort order: by month, then by the internal storage id (`expenses.id`) — an ordering key only;
+  that id is never shown to the user (ADR 0016, E12)
 
 ### 4. CSV Report (`generate_csv_report`)
 - Fetches current-month (or caller-specified month) expenses
