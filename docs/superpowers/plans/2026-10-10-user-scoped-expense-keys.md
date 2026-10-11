@@ -372,7 +372,9 @@ uv run pytest -o addopts=""
 
 ```python
 expense = outcome.expense
-print(f"\nSaved expense: {expense.user_key} — {expense.merchant} — {expense.amount:.2f} {expense.currency} — {expense.date}")
+print(
+    f"\nSaved expense: {expense.user_key} — {expense.merchant} — {expense.amount:.2f} {expense.currency} — {expense.date}"
+)
 ```
 
 - [ ] `features/cli_extraction.feature` asserts the same line.
