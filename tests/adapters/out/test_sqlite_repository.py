@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -9,6 +10,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from expense_report.adapters.out.sqlite_repository import SqliteExpenseRepository
 
+
+import pytest
 
 from expense_report.domain.models import Expense
 
@@ -28,6 +31,7 @@ class TestSave:
         """When expense.id is None, save assigns an auto-increment integer id."""
         expense = Expense(
             id=None,
+            user_key=None,
             amount=Decimal("42.50"),
             currency="EUR",
             merchant="Shop",
@@ -48,6 +52,7 @@ class TestSave:
         """When expense.id is set, save preserves it."""
         expense = Expense(
             id=99,
+            user_key=None,
             amount=Decimal("15.00"),
             currency="USD",
             merchant="Cafe",
@@ -63,6 +68,189 @@ class TestSave:
         assert saved.id == 99
 
 
+class TestUserKey:
+    """Per-person user_key (issue #16) — computed inside the INSERT."""
+
+    def _expense(
+        self,
+        user_id: int,
+        expense_date: date,
+        *,
+        merchant: str = "Shop",
+        created_at: datetime | None = None,
+    ) -> Expense:
+        """An Expense as the bot builds one before save: no id, no key."""
+        if created_at is None:
+            created_at = datetime(expense_date.year, expense_date.month, expense_date.day, 12, 0, 0)
+        return Expense(
+            id=None,
+            user_key=None,
+            amount=Decimal("10.00"),
+            currency="EUR",
+            merchant=merchant,
+            date=expense_date,
+            category=None,
+            user_id=user_id,
+            receipt_photo_id=None,
+            created_at=created_at,
+        )
+
+    def test_save_assigns_user_key_from_expense_date(self, repo: "SqliteExpenseRepository") -> None:
+        """save returns the Expense carrying its YYYYMMDD-n key."""
+        saved = repo.save(self._expense(1, date(2026, 7, 18)))
+        assert saved.user_key == "20260718-1"
+
+    def test_save_numbers_same_date_expenses_in_insert_order(
+        self, repo: "SqliteExpenseRepository"
+    ) -> None:
+        """Two Expenses on one expense date get -1 then -2 in insert order."""
+        first = repo.save(self._expense(1, date(2026, 7, 18), merchant="First"))
+        second = repo.save(self._expense(1, date(2026, 7, 18), merchant="Second"))
+        assert first.user_key == "20260718-1"
+        assert second.user_key == "20260718-2"
+
+    def test_save_keys_are_per_person_on_the_same_date(
+        self, repo: "SqliteExpenseRepository"
+    ) -> None:
+        """Two people on one expense date both get -1: same text, different owner."""
+        mine = repo.save(self._expense(1, date(2026, 7, 18)))
+        theirs = repo.save(self._expense(2, date(2026, 7, 18)))
+        assert mine.user_key == "20260718-1"
+        assert theirs.user_key == "20260718-1"
+        assert mine.user_id != theirs.user_id
+
+    def test_save_key_prefix_follows_expense_date_not_created_at(
+        self, repo: "SqliteExpenseRepository"
+    ) -> None:
+        """Submitted 2026-07-20 but dated 2026-06-30 keys as 20260630-1."""
+        saved = repo.save(
+            self._expense(
+                1,
+                date(2026, 6, 30),
+                created_at=datetime(2026, 7, 20, 9, 0, 0),
+            )
+        )
+        assert saved.user_key == "20260630-1"
+
+    def test_save_does_not_reuse_a_key_freed_by_soft_deletion(
+        self, repo: "SqliteExpenseRepository"
+    ) -> None:
+        """Soft-deleting -2 does not hand -2 to the next Expense: it gets -3."""
+        repo.save(self._expense(1, date(2026, 7, 18), merchant="First"))
+        second = repo.save(self._expense(1, date(2026, 7, 18), merchant="Second"))
+        assert second.user_key == "20260718-2"
+        assert repo.delete_by_user_key(user_id=1, user_key="20260718-2") is not None
+
+        third = repo.save(self._expense(1, date(2026, 7, 18), merchant="Third"))
+        assert third.user_key == "20260718-3"
+
+    def test_save_returns_the_assigned_key(self, repo: "SqliteExpenseRepository") -> None:
+        """The returned key is the stored one — reading back is not a second computation."""
+        saved = repo.save(self._expense(1, date(2026, 7, 18)))
+        assert saved.id is not None
+        assert saved.user_key == "20260718-1"
+        reread = repo.get_by_id(saved.id)
+        assert reread is not None
+        assert reread.user_key == saved.user_key
+
+    def test_save_allows_two_rows_with_null_user_key(self, snapshot_db: str) -> None:
+        """The pre-backfill state: two legacy rows with NULL user_key coexist."""
+        from expense_report.adapters.out.sqlite_repository import SqliteExpenseRepository
+
+        repo = SqliteExpenseRepository(snapshot_db)
+        for row_id in (101, 102):
+            repo.save(
+                Expense(
+                    id=row_id,
+                    user_key=None,
+                    amount=Decimal("10.00"),
+                    currency="EUR",
+                    merchant="Legacy",
+                    date=date(2026, 7, 18),
+                    category=None,
+                    user_id=1,
+                    receipt_photo_id=None,
+                    created_at=datetime(2026, 7, 18, 12, 0, 0),
+                )
+            )
+
+        rows = repo._conn.execute(
+            "SELECT * FROM expenses WHERE user_id = ? AND date = ?", (1, "2026-07-18")
+        ).fetchall()
+        assert len(rows) == 2
+        assert [row["user_key"] for row in rows] == [None, None]
+
+    def test_save_rejects_a_key_clash_via_unique_index(self, snapshot_db: str) -> None:
+        """A duplicate (user_id, user_key) is refused by the UNIQUE index."""
+        from expense_report.adapters.out.sqlite_repository import SqliteExpenseRepository
+
+        repo = SqliteExpenseRepository(snapshot_db)
+        repo.save(self._expense(1, date(2026, 7, 18)))
+
+        with pytest.raises(
+            sqlite3.IntegrityError,
+            match="UNIQUE constraint failed: expenses.user_id, expenses.user_key",
+        ):
+            repo._conn.execute(
+                """
+                INSERT INTO expenses
+                    (amount, currency, merchant, date, category, user_id,
+                     receipt_photo_id, created_at, deleted_at, user_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "10.00",
+                    "EUR",
+                    "Clash",
+                    "2026-07-18",
+                    None,
+                    1,
+                    None,
+                    "2026-07-18T12:00:00",
+                    None,
+                    "20260718-1",
+                ),
+            )
+
+    def test_delete_by_user_key_deletes_only_the_owner_row(
+        self, repo: "SqliteExpenseRepository"
+    ) -> None:
+        """Identically-keyed rows: only the owner's row is soft-deleted."""
+        mine = repo.save(self._expense(1, date(2026, 7, 18), merchant="Mine"))
+        theirs = repo.save(self._expense(2, date(2026, 7, 18), merchant="Theirs"))
+        assert mine.user_key == "20260718-1"
+        assert theirs.user_key == "20260718-1"
+
+        deleted = repo.delete_by_user_key(user_id=1, user_key="20260718-1")
+        assert deleted is not None
+        assert deleted.user_id == 1
+        assert deleted.merchant == "Mine"
+        assert repo.get_by_user_and_month(user_id=1, year=2026, month=7) == []
+
+        survivors = repo.get_by_user_and_month(user_id=2, year=2026, month=7)
+        assert [e.merchant for e in survivors] == ["Theirs"]
+        assert survivors[0].user_key == "20260718-1"
+
+    def test_delete_by_user_key_returns_none_for_another_persons_key(
+        self, repo: "SqliteExpenseRepository"
+    ) -> None:
+        """Typing another person's key deletes nothing and returns None."""
+        mine = repo.save(self._expense(1, date(2026, 7, 18)))
+        assert mine.user_key == "20260718-1"
+        assert repo.delete_by_user_key(user_id=2, user_key="20260718-1") is None
+        assert len(repo.get_by_user_and_month(user_id=1, year=2026, month=7)) == 1
+
+    def test_delete_by_user_key_returns_none_when_already_deleted(
+        self, repo: "SqliteExpenseRepository"
+    ) -> None:
+        """A second delete of the same key finds nothing: the row is not resurrected."""
+        saved = repo.save(self._expense(1, date(2026, 7, 18)))
+        assert saved.user_key == "20260718-1"
+        assert repo.delete_by_user_key(user_id=1, user_key="20260718-1") is not None
+        assert repo.delete_by_user_key(user_id=1, user_key="20260718-1") is None
+        assert repo.get_by_user_and_month(user_id=1, year=2026, month=7) == []
+
+
 class TestGetById:
     """Retrieve by id."""
 
@@ -76,6 +264,7 @@ class TestGetById:
         dt = datetime(2026, 7, 3, 9, 30, 0)
         expense = Expense(
             id=None,
+            user_key=None,
             amount=Decimal("99.99"),
             currency="EUR",
             merchant="Restaurant",
@@ -122,6 +311,7 @@ class TestGetByUserAndMonth:
         return repo.save(
             Expense(
                 id=None,
+                user_key=None,
                 amount=Decimal(amount),
                 currency=currency,
                 merchant=merchant,
@@ -203,6 +393,7 @@ class TestSerialization:
         """Decimal amounts survive save/retrieve without precision loss."""
         expense = Expense(
             id=None,
+            user_key=None,
             amount=Decimal("123.45"),
             currency="EUR",
             merchant="Precise Shop",
@@ -226,6 +417,7 @@ class TestSerialization:
         """Category=None survives save/retrieve."""
         expense = Expense(
             id=None,
+            user_key=None,
             amount=Decimal("10.00"),
             currency="EUR",
             merchant="No Cat Shop",
@@ -247,6 +439,7 @@ class TestSerialization:
         """receipt_photo_id=None survives save/retrieve."""
         expense = Expense(
             id=None,
+            user_key=None,
             amount=Decimal("25.00"),
             currency="USD",
             merchant="Store",
@@ -290,6 +483,7 @@ class TestGetMonthsWithExpenses:
             repo.save(
                 Expense(
                     id=None,
+                    user_key=None,
                     amount=Decimal("10.00"),
                     currency="EUR",
                     merchant=merchant,
@@ -321,6 +515,7 @@ class TestGetMonthsWithExpenses:
         repo.save(
             Expense(
                 id=None,
+                user_key=None,
                 amount=Decimal("10.00"),
                 currency="EUR",
                 merchant="A",
@@ -334,6 +529,7 @@ class TestGetMonthsWithExpenses:
         repo.save(
             Expense(
                 id=None,
+                user_key=None,
                 amount=Decimal("20.00"),
                 currency="EUR",
                 merchant="B",
@@ -357,6 +553,7 @@ class TestGetMonthsWithExpenses:
         repo.save(
             Expense(
                 id=None,
+                user_key=None,
                 amount=Decimal("10.00"),
                 currency="EUR",
                 merchant="A",
@@ -370,6 +567,7 @@ class TestGetMonthsWithExpenses:
         repo.save(
             Expense(
                 id=None,
+                user_key=None,
                 amount=Decimal("20.00"),
                 currency="EUR",
                 merchant="B",
@@ -385,8 +583,8 @@ class TestGetMonthsWithExpenses:
         assert repo.get_months_with_expenses(123, 2026) == {7}
 
 
-class TestDeleteById:
-    """Tests for delete_by_id with user scoping."""
+class TestDeleteByUserKey:
+    """Tests for delete_by_user_key with user scoping."""
 
     def _create_expense(
         self,
@@ -400,6 +598,7 @@ class TestDeleteById:
         return repo.save(
             Expense(
                 id=None,
+                user_key=None,
                 amount=Decimal(amount),
                 currency=currency,
                 merchant=merchant,
@@ -411,48 +610,52 @@ class TestDeleteById:
             )
         )
 
-    def test_delete_by_id_removes_and_returns_expense(
+    def test_delete_by_user_key_removes_and_returns_expense(
         self, repo: "SqliteExpenseRepository"
     ) -> None:
-        """delete_by_id removes the expense and returns the deleted data."""
+        """delete_by_user_key soft-deletes the row and returns the deleted data."""
         saved = self._create_expense(repo, user_id=1, d=date(2026, 7, 10), amount="42.50")
 
         assert saved.id is not None
-        result = repo.delete_by_id(user_id=1, expense_id=saved.id)
+        assert saved.user_key == "20260710-1"
+        result = repo.delete_by_user_key(user_id=1, user_key="20260710-1")
 
         assert result is not None
         assert result.id == saved.id
+        assert result.user_key == "20260710-1"
         assert result.amount == Decimal("42.50")
 
-        # Verify hard delete: not retrievable
+        # Verify the soft-deleted row is not retrievable
         assert repo.get_by_id(saved.id) is None
 
-    def test_delete_by_id_returns_none_when_not_found(
+    def test_delete_by_user_key_returns_none_when_not_found(
         self, repo: "SqliteExpenseRepository"
     ) -> None:
-        """delete_by_id returns None for a non-existent id."""
-        result = repo.delete_by_id(user_id=1, expense_id=99999)
+        """delete_by_user_key returns None for a key that was never assigned."""
+        result = repo.delete_by_user_key(user_id=1, user_key="20260710-1")
         assert result is None
 
-    def test_delete_by_id_scoped_to_user(self, repo: "SqliteExpenseRepository") -> None:
-        """delete_by_id only deletes if user_id matches, returns None otherwise."""
+    def test_delete_by_user_key_scoped_to_user(self, repo: "SqliteExpenseRepository") -> None:
+        """delete_by_user_key only deletes the owner's row, returns None otherwise."""
         saved = self._create_expense(repo, user_id=1, d=date(2026, 7, 10))
 
-        # User 2 tries to delete user 1's expense
+        # User 2 types the same key text
         assert saved.id is not None
-        result = repo.delete_by_id(user_id=2, expense_id=saved.id)
+        assert saved.user_key == "20260710-1"
+        result = repo.delete_by_user_key(user_id=2, user_key="20260710-1")
         assert result is None
 
         # User 1's expense still exists
         assert repo.get_by_id(saved.id) is not None
 
-    def test_delete_by_id_scoped_to_user_succeeds_for_owner(
+    def test_delete_by_user_key_scoped_to_user_succeeds_for_owner(
         self, repo: "SqliteExpenseRepository"
     ) -> None:
-        """delete_by_id succeeds when user_id matches the owner."""
+        """delete_by_user_key succeeds when user_id matches the owner."""
         saved = self._create_expense(repo, user_id=42, d=date(2026, 7, 10))
         assert saved.id is not None
-        result = repo.delete_by_id(user_id=42, expense_id=saved.id)
+        assert saved.user_key == "20260710-1"
+        result = repo.delete_by_user_key(user_id=42, user_key="20260710-1")
         assert result is not None
         assert repo.get_by_id(saved.id) is None
 
@@ -475,6 +678,7 @@ class TestGetTotalByUserAndYear:
             repo.save(
                 Expense(
                     id=None,
+                    user_key=None,
                     amount=Decimal(amount),
                     currency="EUR",
                     merchant="Shop",
@@ -506,6 +710,7 @@ class TestGetTotalByUserAndYear:
         repo.save(
             Expense(
                 id=None,
+                user_key=None,
                 amount=Decimal("50.00"),
                 currency="EUR",
                 merchant="A",
@@ -519,6 +724,7 @@ class TestGetTotalByUserAndYear:
         repo.save(
             Expense(
                 id=None,
+                user_key=None,
                 amount=Decimal("30.00"),
                 currency="EUR",
                 merchant="B",
@@ -542,6 +748,7 @@ class TestGetTotalByUserAndYear:
         repo.save(
             Expense(
                 id=None,
+                user_key=None,
                 amount=Decimal("100.00"),
                 currency="EUR",
                 merchant="A",
@@ -555,6 +762,7 @@ class TestGetTotalByUserAndYear:
         repo.save(
             Expense(
                 id=None,
+                user_key=None,
                 amount=Decimal("50.00"),
                 currency="EUR",
                 merchant="B",
@@ -581,6 +789,7 @@ class TestGetTotalByUserAndYear:
             repo.save(
                 Expense(
                     id=None,
+                    user_key=None,
                     amount=Decimal(amount),
                     currency="EUR",
                     merchant="Shop",
@@ -610,6 +819,7 @@ class TestLogicalDeletion:
         return repo.save(
             Expense(
                 id=None,
+                user_key=None,
                 amount=Decimal(amount),
                 currency="EUR",
                 merchant=merchant,
@@ -626,12 +836,14 @@ class TestLogicalDeletion:
         saved = self._create_expense(repo, user_id=1, d=date(2026, 7, 1))
         assert saved.deleted_at is None
 
-    def test_delete_by_id_soft_deletes_row_retained(self, repo: "SqliteExpenseRepository") -> None:
-        """delete_by_id sets deleted_at and retains the row in the table."""
+    def test_delete_by_user_key_soft_deletes_row_retained(
+        self, repo: "SqliteExpenseRepository"
+    ) -> None:
+        """delete_by_user_key sets deleted_at and retains the row in the table."""
         saved = self._create_expense(repo, user_id=1, d=date(2026, 7, 1), amount="42.50")
         assert saved.id is not None
 
-        result = repo.delete_by_id(user_id=1, expense_id=saved.id)
+        result = repo.delete_by_user_key(user_id=1, user_key="20260701-1")
 
         # Caller still gets the deleted expense for the success message.
         assert result is not None
@@ -649,7 +861,7 @@ class TestLogicalDeletion:
         """get_by_id excludes soft-deleted rows by default."""
         saved = self._create_expense(repo, user_id=1, d=date(2026, 7, 1))
         assert saved.id is not None
-        repo.delete_by_id(user_id=1, expense_id=saved.id)
+        repo.delete_by_user_key(user_id=1, user_key="20260701-1")
 
         assert repo.get_by_id(saved.id) is None
 
@@ -660,7 +872,7 @@ class TestLogicalDeletion:
         self._create_expense(repo, user_id=1, d=date(2026, 7, 1), merchant="Live")
         gone = self._create_expense(repo, user_id=1, d=date(2026, 7, 2), merchant="Gone")
         assert gone.id is not None
-        repo.delete_by_id(user_id=1, expense_id=gone.id)
+        repo.delete_by_user_key(user_id=1, user_key="20260702-1")
 
         results = repo.get_by_user_and_month(user_id=1, year=2026, month=7)
 
@@ -673,7 +885,7 @@ class TestLogicalDeletion:
         self._create_expense(repo, user_id=1, d=date(2026, 7, 1))
         gone = self._create_expense(repo, user_id=1, d=date(2026, 3, 5))
         assert gone.id is not None
-        repo.delete_by_id(user_id=1, expense_id=gone.id)
+        repo.delete_by_user_key(user_id=1, user_key="20260305-1")
 
         assert repo.get_months_with_expenses(1, 2026) == {7}
 
@@ -684,7 +896,7 @@ class TestLogicalDeletion:
         self._create_expense(repo, user_id=1, d=date(2026, 7, 1), amount="40.00")
         gone = self._create_expense(repo, user_id=1, d=date(2026, 3, 5), amount="30.00")
         assert gone.id is not None
-        repo.delete_by_id(user_id=1, expense_id=gone.id)
+        repo.delete_by_user_key(user_id=1, user_key="20260305-1")
 
         assert repo.get_total_by_user_and_year(1, 2026) == Decimal("40.00")
 
@@ -692,9 +904,9 @@ class TestLogicalDeletion:
         """Deleting an already soft-deleted expense returns None (not found)."""
         saved = self._create_expense(repo, user_id=1, d=date(2026, 7, 1))
         assert saved.id is not None
-        repo.delete_by_id(user_id=1, expense_id=saved.id)
+        repo.delete_by_user_key(user_id=1, user_key="20260701-1")
 
-        assert repo.delete_by_id(user_id=1, expense_id=saved.id) is None
+        assert repo.delete_by_user_key(user_id=1, user_key="20260701-1") is None
 
     def test_soft_delete_does_not_disturb_siblings(self, repo: "SqliteExpenseRepository") -> None:
         """Soft-deleting one expense leaves sibling rows untouched (ids stable)."""
@@ -703,7 +915,7 @@ class TestLogicalDeletion:
         e3 = self._create_expense(repo, user_id=1, d=date(2026, 7, 3), merchant="C")
         assert e1.id is not None and e2.id is not None and e3.id is not None
 
-        repo.delete_by_id(user_id=1, expense_id=e2.id)
+        repo.delete_by_user_key(user_id=1, user_key="20260702-1")
 
         # Newest-first ordering: e3 (Jul 3), then e1 (Jul 1); e2 is gone.
         remaining = repo.get_by_user_and_month(user_id=1, year=2026, month=7)

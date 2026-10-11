@@ -75,6 +75,21 @@ class TestExpense:
         )
         assert exp.user_key is None
 
+    def test_user_key_is_required_positional(self) -> None:
+        """Expense has no default for user_key — omitting it is a TypeError."""
+        with pytest.raises(TypeError, match="user_key"):
+            Expense(  # ty: ignore[missing-argument]
+                id=None,
+                amount=Decimal("15.00"),
+                currency="USD",
+                merchant="Coffee Shop",
+                date=date(2026, 7, 1),
+                category=None,
+                user_id=987654321,
+                receipt_photo_id=None,
+                created_at=datetime(2026, 7, 1, 12, 30, 0),
+            )
+
     def test_is_frozen(self) -> None:
         """Expense instances cannot be mutated."""
         dt = datetime(2026, 7, 1, 12, 30, 0)
