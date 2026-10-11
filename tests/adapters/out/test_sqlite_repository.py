@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -658,6 +659,105 @@ class TestDeleteByUserKey:
         result = repo.delete_by_user_key(user_id=42, user_key="20260710-1")
         assert result is not None
         assert repo.get_by_id(saved.id) is None
+
+
+class TestDeleteUnderMissingUniqueness:
+    """Hardening: the soft-delete UPDATE must address only live rows.
+
+    The UNIQUE(user_id, user_key) index normally bounds a key to one row, so the
+    UPDATE predicate not needing `deleted_at IS NULL` is a no-op today. These tests
+    pin the contract without that crutch: they run on a schema whose index is
+    missing — the state a skipped or drifted changeset leaves (the changeset's
+    precondition uses onFail="MARK_RAN", so a mismatch runs nothing and still marks
+    it applied).
+    """
+
+    @pytest.fixture
+    def drifted_db(self, tmp_path: Path) -> str:
+        """Schema snapshot with the UNIQUE index removed (changeset drift)."""
+        from tests._schema import SNAPSHOT_PATH
+
+        sql = "\n".join(
+            line
+            for line in SNAPSHOT_PATH.read_text(encoding="utf-8").splitlines()
+            if not line.lstrip().startswith("CREATE UNIQUE INDEX")
+        )
+        db_path = tmp_path / "drifted.db"
+        with sqlite3.connect(str(db_path)) as connection:
+            connection.executescript(sql)
+        return str(db_path)
+
+    def _drifted_repo(self, drifted_db: str) -> "SqliteExpenseRepository":
+        from expense_report.adapters.out.sqlite_repository import SqliteExpenseRepository
+
+        return SqliteExpenseRepository(drifted_db)
+
+    def _seed_twin_rows(self, drifted_db: str) -> None:
+        """Two rows sharing (user_id, user_key): one live, one already deleted."""
+        columns = (
+            "id, amount, currency, merchant, date, category, user_id, "
+            "receipt_photo_id, created_at, deleted_at, user_key"
+        )
+        with sqlite3.connect(drifted_db) as connection:
+            connection.execute(
+                f"INSERT INTO expenses ({columns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    1,
+                    "10.00",
+                    "EUR",
+                    "Shop",
+                    "2026-07-10",
+                    None,
+                    7,
+                    None,
+                    "2026-07-10T12:00:00",
+                    None,
+                    "20260710-1",
+                ),
+            )
+            connection.execute(
+                f"INSERT INTO expenses ({columns}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    2,
+                    "9.00",
+                    "EUR",
+                    "Cafe",
+                    "2026-07-10",
+                    None,
+                    7,
+                    None,
+                    "2026-07-10T12:00:00",
+                    "2026-01-01T00:00:00",
+                    "20260710-1",
+                ),
+            )
+
+    def test_delete_by_user_key_never_restamps_an_already_deleted_twin(
+        self, drifted_db: str
+    ) -> None:
+        """The already-deleted twin keeps its original deleted_at."""
+        self._seed_twin_rows(drifted_db)
+        repo = self._drifted_repo(drifted_db)
+
+        repo.delete_by_user_key(user_id=7, user_key="20260710-1")
+
+        stamps = {
+            row["id"]: row["deleted_at"]
+            for row in repo._conn.execute(
+                "SELECT id, deleted_at FROM expenses WHERE user_id = 7 AND user_key = ?",
+                ("20260710-1",),
+            )
+        }
+        assert stamps[2] == "2026-01-01T00:00:00"
+
+    def test_delete_by_user_key_deletes_the_live_twin_under_drift(self, drifted_db: str) -> None:
+        """The live row is still the one that gets deleted."""
+        self._seed_twin_rows(drifted_db)
+        repo = self._drifted_repo(drifted_db)
+
+        repo.delete_by_user_key(user_id=7, user_key="20260710-1")
+
+        assert repo.get_by_id(1) is None
 
 
 class TestGetTotalByUserAndYear:

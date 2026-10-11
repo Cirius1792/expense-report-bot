@@ -203,7 +203,10 @@ class SqliteExpenseRepository:
 
         Marks the row with a deleted_at timestamp (ADR 0011); the row is never
         physically removed. Ownership is part of the predicate, so another
-        person's identically-keyed row is untouched. Returns the deleted Expense
+        person's identically-keyed row is untouched. The UPDATE addresses only
+        live rows — same predicate as the SELECT above — so an already-deleted row
+        sharing the key is never re-stamped even if the UNIQUE(user_id, user_key)
+        index is missing (changeset drift). Returns the deleted Expense
         for the caller to format a success message, or None if no matching live
         expense exists (unknown key, other person, or already deleted).
         """
@@ -222,7 +225,8 @@ class SqliteExpenseRepository:
 
         deleted_at = datetime.now()
         self._conn.execute(
-            "UPDATE expenses SET deleted_at = ? WHERE user_id = ? AND user_key = ?",
+            "UPDATE expenses SET deleted_at = ? "
+            "WHERE user_id = ? AND user_key = ? AND deleted_at IS NULL",
             (deleted_at.isoformat(), user_id, user_key),
         )
         self._conn.commit()
