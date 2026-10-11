@@ -10,7 +10,7 @@ because it pulls a pinned historical image from `ghcr.io`.
    `deleted_at`, no Liquibase tracking tables) and writes real rows through its
    real `expense-extract` CLI.
 2. The PR image's **real entrypoint** migrates that database: `deleted_at` is
-   added, `databasechangelog` / `databasechangeloglock` appear with the two
+   added, `databasechangelog` / `databasechangeloglock` appear with the three
    baseline changesets, and the legacy rows are preserved byte-for-byte.
 3. The PR's `SqliteExpenseRepository` reads the migrated rows back.
 
