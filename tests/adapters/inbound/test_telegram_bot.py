@@ -1927,10 +1927,10 @@ class TestDeleteCallbackHandler:
             "delete:20261340-1",
         ],
     )
-    def test_delete_callback_malformed_payload_logs_warning_and_replies_not_found(
+    def test_delete_callback_malformed_payload_logs_warning_and_ignores(
         self, payload: str, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """A malformed delete payload delegates; the adapter warns and replies the miss wording."""
+        """A malformed delete payload delegates; the adapter warns and stays silent."""
         from expense_report.adapters.inbound.telegram_bot import _make_delete_callback_handler
 
         mock_queries = _make_queries_mock()

@@ -36,8 +36,8 @@ token is a legal key is domain policy, not transport translation.
 - **The adapter keeps no key logic.** `telegram_bot.py` loses `USER_KEY_PATTERN`,
   `_is_well_formed_key` and the `import re` that only served them. Both delete paths
   extract a key from the wire payload, delegate once, and branch on `status`:
-  `invalid_key` → `Usage: /delete <key>` (command) / `Expense not found.` + warning
-  (button); `not_found` → the miss wording; `deleted` → the hit reply. The
+  `invalid_key` → `Usage: /delete <key>` (command) / warning + silent return (button);
+  `not_found` → the miss wording; `deleted` → the hit reply. The
   `data.startswith("delete:")` guard stays in the adapter — that is wire-payload
   handling, not key logic.
 
