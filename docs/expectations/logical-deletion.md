@@ -4,6 +4,10 @@
 > (expectations 2, 6, and the "hard-deletes" statements). The user-facing
 > contract of `/delete`, the delete button, `/list`, `/report`, and CSV is
 > unchanged — only the storage mechanism changes.
+>
+> **Note (2026-10-10):** the "ADR 0010 (user-scoped ids)" references below point at a file
+> that was never written. That decision now lives in ADR 0016 — User-scoped Expense Keys.
+> No renumbering.
 
 ## Concept
 
@@ -91,4 +95,4 @@ user-facing data access. Rows can still be retrieved on demand via an opt-in
 | application layer unchanged | `tests/application/test_expense_queries.py` (all passing, no edits) |
 | schema migration | `tests/adapters/out/test_sqlite_repository.py::TestSchemaMigration::test_existing_db_without_deleted_at_migrates` |
 | no `DELETE FROM expenses` remains | `grep -rn "DELETE FROM" src tests` → no matches |
-| user-scoped key counts soft-deleted rows | deferred to issue #16 / ADR 0010 (key-count INSERT does not exist yet) |
+| user-scoped key counts soft-deleted rows | deferred to issue #16 / ADR 0016 (key-count INSERT does not exist yet) — proven by E10 in `docs/expectations/user-scoped-expense-keys.md` |
