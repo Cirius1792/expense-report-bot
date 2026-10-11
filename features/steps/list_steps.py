@@ -171,29 +171,49 @@ def step_message_lists_expense_key(context: Any, expense_key: str, merchant: str
     owned = [line for line in rows if merchant in line]
     assert owned, f"No expense row for merchant '{merchant}' in message: {text[:300]}"
     for line in owned:
-        assert expense_key in line, (
+        assert _row_key(line) == expense_key.lstrip("#"), (
             f"Expected the key cell '{expense_key}' on the row for '{merchant}', got row: {line!r}"
         )
 
 
 @then("the listing shows a key for every expense row")
 def step_listing_keys_every_row(context: Any) -> None:
-    """Every rendered row carries a well-formed key coherent with its date.
+    """Every rendered row carries its own well-formed, date-coherent key cell.
 
-    Counts rows against keys in the message text: a row rendered with the `-`
-    placeholder, or with a key whose prefix is not the row's own date (E7),
-    fails here.
+    Four invariants on the month view:
+    - every row has a well-formed `YYYYMMDD-n` key (no `-` placeholder),
+    - the rendered rows match the count the listing itself claims in
+      `Total: … (N expenses)` — a silently dropped row fails here,
+    - the keys are pairwise distinct, so two rows can never both render
+      `#20260710-1` (E5 insert-order numbering),
+    - each key's 8-digit prefix is the date printed in that row's own column (E7).
     """
     text = context._list_message_text
     rows = _expense_row_lines(text)
     assert rows, "Expected at least one expense row in the listing"
-    unkeyed = [line for line in rows if _row_key(line) is None]
+
+    claimed = _claimed_row_count(text)
+    assert claimed is not None, f"Expected a '(N expenses)' claim in the listing, got: {text[:300]}"
+    assert len(rows) == claimed, (
+        f"Listing claims {claimed} expenses but rendered {len(rows)} rows: {text[:300]}"
+    )
+
+    keys = [_row_key(line) for line in rows]
+    unkeyed = [line for line, key in zip(rows, keys) if key is None]
     assert not unkeyed, (
         "Rows without a key "
         f"({len(rows) - len(unkeyed)}/{len(rows)} keyed): "
         f"{[repr(line) for line in unkeyed]}"
     )
-    incoherent = [line for line in rows if not _key_matches_row_date(_row_key(line) or "", line)]
+
+    dupes = [key for key, hits in Counter(keys).items() if hits > 1]
+    assert len(set(keys)) == len(rows), (
+        f"Rows sharing the key cell {dupes} across {len(rows)} rows: {text[:300]}"
+    )
+
+    incoherent = [
+        line for line, key in zip(rows, keys) if not _key_matches_row_date(key or "", line)
+    ]
     assert not incoherent, (
         f"Rows whose key prefix is not their own date: {[repr(line) for line in incoherent]}"
     )
@@ -322,6 +342,12 @@ def _make_callback_query_update(context: Any, callback_data: str) -> MagicMock:
     return update
 
 
+# Task 6 pins the month-view row as `#{user_key:<10} {date}  {merchant:<20} …`:
+# one `#`, a 10-char key cell, one separator space, then the ISO date.
+_KEY_CELL_WIDTH = 10
+_DATE_COLUMN = 1 + _KEY_CELL_WIDTH + 1
+
+
 def _expense_row_lines(text: str) -> list[str]:
     """Month-view row lines, identified by the leading `#` key marker.
 
@@ -337,10 +363,21 @@ def _row_key(line: str) -> str | None:
     return match.group("key") if match else None
 
 
+def _claimed_row_count(text: str) -> int | None:
+    """The row count the month view claims in its `Total: … (N expenses)` line."""
+    match = re.search(r"\((\d+) expenses?\)", text)
+    return int(match.group(1)) if match else None
+
+
 def _key_matches_row_date(key: str, line: str) -> bool:
-    """True when the key's 8-digit prefix is the date printed on that row (E7)."""
-    dates = re.findall(r"\d{4}-\d{2}-\d{2}", line)
-    return any(key.partition("-")[0] == date_digits.replace("-", "") for date_digits in dates)
+    """True when the key's 8-digit prefix is the date printed in that row's column.
+
+    Reads the date at the fixed offset Task 6 pins (`#{user_key:<10} {date}  …`),
+    immediately after the key cell. Scanning the whole line for any ISO date
+    would let a merchant or category containing a date loosen the invariant.
+    """
+    field = line[_DATE_COLUMN : _DATE_COLUMN + len("YYYY-MM-DD")]
+    return field.replace("-", "") == key.partition("-")[0]
 
 
 def _get_all_button_labels(markup: Any) -> list[str]:
