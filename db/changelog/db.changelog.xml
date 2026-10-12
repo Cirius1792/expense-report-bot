@@ -28,4 +28,40 @@
         <sql>ALTER TABLE expenses ADD COLUMN deleted_at TEXT</sql>
     </changeSet>
 
+    <changeSet id="003-add-user-key" author="expense-report">
+        <preconditions onFail="MARK_RAN" onError="HALT">
+            <not>
+                <sqlCheck expectedResult="1">SELECT CASE WHEN EXISTS (SELECT 1 FROM pragma_table_info('expenses') WHERE name = 'user_key') THEN '1' ELSE '0' END</sqlCheck>
+            </not>
+        </preconditions>
+        <sql>CREATE TABLE expenses_new (id INTEGER PRIMARY KEY AUTOINCREMENT, amount TEXT NOT NULL, currency TEXT NOT NULL, merchant TEXT NOT NULL, date TEXT NOT NULL, category TEXT, user_id INTEGER NOT NULL, receipt_photo_id TEXT, created_at TEXT NOT NULL, deleted_at TEXT, user_key TEXT);</sql>
+        <sql>CREATE UNIQUE INDEX uk ON expenses_new (user_id, user_key);</sql>
+        <sql>INSERT INTO expenses_new (id, amount, currency, merchant, date, category, user_id, receipt_photo_id, created_at, deleted_at) SELECT id, amount, currency, merchant, date, category, user_id, receipt_photo_id, created_at, deleted_at FROM expenses;</sql>
+        <sql>DROP TABLE expenses;</sql>
+        <sql>ALTER TABLE expenses_new RENAME TO expenses;</sql>
+    </changeSet>
+
+    <!-- ADR 0020: existing Expenses copied in by 003 carry a NULL user_key.
+         Number them densely 1..N per (user_id, date) in insertion order, with the
+         prefix taken from each row's own date. Dense numbering matches save()'s
+         COUNT(id) + 1 so the next insert is always free; soft-deleted rows are
+         counted (ADR 0011). Only NULL keys are written, so a fresh or already-
+         backfilled database is untouched. Liquibase tracking gives exactly-once. -->
+    <changeSet id="004-backfill-user-key" author="expense-report">
+        <sql>
+            UPDATE expenses
+            SET user_key = (
+                SELECT substr(ranked.date, 1, 4) || substr(ranked.date, 6, 2) || substr(ranked.date, 9, 2) || '-' || ranked.n
+                FROM (
+                    SELECT id, date,
+                        ROW_NUMBER() OVER (PARTITION BY user_id, date ORDER BY id) AS n
+                    FROM expenses
+                    WHERE user_key IS NULL
+                ) AS ranked
+                WHERE ranked.id = expenses.id
+            )
+            WHERE user_key IS NULL;
+        </sql>
+    </changeSet>
+
 </databaseChangeLog>

@@ -53,6 +53,7 @@ class TestSaveLogging:
 
         expense = Expense(
             id=99,
+            user_key=None,
             amount=Decimal("42.50"),
             currency="EUR",
             merchant="Shop",
@@ -82,6 +83,7 @@ class TestSaveLogging:
 
         expense = Expense(
             id=None,
+            user_key=None,
             amount=Decimal("10.00"),
             currency="EUR",
             merchant="Shop",
@@ -116,6 +118,7 @@ class TestGetByIdLogging:
 
         expense = Expense(
             id=42,
+            user_key=None,
             amount=Decimal("99.99"),
             currency="USD",
             merchant="Store",
@@ -179,6 +182,7 @@ class TestGetByUserAndMonthLogging:
         repo.save(
             Expense(
                 id=None,
+                user_key=None,
                 amount=Decimal("10.00"),
                 currency="EUR",
                 merchant="A",
@@ -192,6 +196,7 @@ class TestGetByUserAndMonthLogging:
         repo.save(
             Expense(
                 id=None,
+                user_key=None,
                 amount=Decimal("20.00"),
                 currency="EUR",
                 merchant="B",

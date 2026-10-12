@@ -10,8 +10,10 @@ because it pulls a pinned historical image from `ghcr.io`.
    `deleted_at`, no Liquibase tracking tables) and writes real rows through its
    real `expense-extract` CLI.
 2. The PR image's **real entrypoint** migrates that database: `deleted_at` is
-   added, `databasechangelog` / `databasechangeloglock` appear with the two
-   baseline changesets, and the legacy rows are preserved byte-for-byte.
+   added, `user_key` is added and every legacy row is backfilled with a
+   `YYYYMMDD-n` key (ADR 0020), `databasechangelog` / `databasechangeloglock`
+   appear with the four baseline changesets, and the legacy rows are preserved
+   byte-for-byte.
 3. The PR's `SqliteExpenseRepository` reads the migrated rows back.
 
 The v0.7.0 tag predates both ADR 0011 (logical deletion) and ADR 0013
@@ -45,6 +47,6 @@ scripts/upgrade-probe/run.sh
 |------|---------|
 | `run.sh` | Orchestrates seed → snapshot → migrate → verify → read-back |
 | `sitecustomize.py` | Stubbed `dspy` LLM boundary (`PYTHONPATH=/stub`) |
-| `inspect_db.py` | JSON snapshot of tables/columns/rows/changesets |
+| `inspect_db.py` | JSON snapshot of tables/columns/rows/user keys/changesets |
 | `verify.py` | Asserts the before/after snapshots |
 | `read_back.py` | Reads migrated rows with the PR repository |

@@ -15,6 +15,7 @@ def snapshot(db_path: str) -> dict[str, object]:
         }
         columns: list[str] = []
         rows: list[dict[str, object]] = []
+        user_keys: list[dict[str, object]] | None = None
         if "expenses" in tables:
             columns = [row[1] for row in connection.execute("PRAGMA table_info(expenses)")]
             rows = [
@@ -23,6 +24,11 @@ def snapshot(db_path: str) -> dict[str, object]:
                     "SELECT id, amount, currency, merchant FROM expenses ORDER BY id"
                 )
             ]
+            if "user_key" in columns:
+                user_keys = [
+                    {"id": row[0], "user_key": row[1]}
+                    for row in connection.execute("SELECT id, user_key FROM expenses ORDER BY id")
+                ]
         changesets = 0
         if "databasechangelog" in tables:
             changesets = connection.execute("SELECT COUNT(*) FROM databasechangelog").fetchone()[0]
@@ -30,6 +36,7 @@ def snapshot(db_path: str) -> dict[str, object]:
         "tables": sorted(tables),
         "columns": columns,
         "rows": rows,
+        "user_keys": user_keys,
         "changesets": changesets,
     }
 

@@ -45,6 +45,7 @@ def _build_expense(
     assert result.merchant is not None and result.date is not None
     return Expense(
         id=None,
+        user_key=None,  # assigned by the repository at save time
         amount=result.amount,
         currency=result.currency,
         merchant=result.merchant,

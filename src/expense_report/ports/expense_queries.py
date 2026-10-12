@@ -7,7 +7,7 @@ adapter never touches the driven repository directly.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Literal, Protocol
 
 from expense_report.domain.models import Expense
 
@@ -21,10 +21,14 @@ class PeriodSummary:
     active_month: int = 0
 
 
+DeletionStatus = Literal["deleted", "not_found", "invalid_key"]
+
+
 @dataclass
 class DeletionResult:
     """Result of an expense deletion attempt."""
 
+    status: DeletionStatus
     deleted: Expense | None = None
 
 
@@ -61,14 +65,19 @@ class ExpenseQueryPort(Protocol):
         """Generate a CSV report string for the given period."""
         ...
 
-    def delete_expense(self, user_id: int, expense_id: int) -> DeletionResult:
-        """Delete a single expense. Returns DeletionResult with the deleted
-        Expense or None if not found."""
+    def delete_expense(self, user_id: int, key: str) -> DeletionResult:
+        """Delete a single expense addressed by its per-person key.
+
+        Returns DeletionResult whose ``status`` is one of: deleted, not_found,
+        invalid_key. ``deleted`` carries the removed Expense only when status is
+        ``deleted``.
+        """
         ...
 
 
 __all__ = [
     "DeletionResult",
+    "DeletionStatus",
     "ExpenseQueryPort",
     "PeriodSummary",
 ]
