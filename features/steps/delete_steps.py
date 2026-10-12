@@ -34,55 +34,6 @@ def step_delete_user_command(context: Any, user_id: int, command: str) -> None:
     context._last_delete_reply = update.effective_message.reply_text.call_args[0][0]
 
 
-@when("user {user_id:d} records the following expense:")
-def step_user_records_expense(context: Any, user_id: int) -> None:
-    """Record one expense per table row, straight through `repository.save`.
-
-    Fixture-level: this is the repository call *behind* the recording path, not
-    the recording path itself — it never touches `ExpenseRecordingUseCase` or the
-    Telegram text/photo handler, so it claims no coverage of that machinery. A
-    scenario that wants the row to travel the whole recording path says so with
-    the telegram steps (`the LLM extracts …` + `I send the message …`).
-
-    What it does pin is the INSERT counter (E13): every row is saved with
-    `id=None`, so its key is assigned inside the INSERT and read back from the
-    row. Hand-writing a key here would pin the scenario's wording instead.
-
-    `_last_saved_expense` is reset before the loop, so a scenario that records
-    nothing cannot assert against a row left over from an earlier one, and each
-    saved row is checked here — the paired Then step names only the last row.
-    """
-    from datetime import date, datetime
-    from decimal import Decimal
-
-    from expense_report.domain.models import Expense
-
-    context._last_saved_expense = None
-    keys: list[str] = []
-    for row in context.table:
-        expense = Expense(
-            id=None,
-            user_key=None,
-            amount=Decimal(row["amount"]),
-            currency=row["currency"],
-            merchant=row["merchant"],
-            date=date.fromisoformat(row["date"]),
-            category=row.get("category"),
-            user_id=user_id,
-            receipt_photo_id=None,
-            created_at=datetime.fromisoformat(f"{row['date']}T12:00:00"),
-        )
-        saved = context.repository.save(expense)
-        assert saved.user_key is not None, (
-            f"save() returned a row with no key for merchant {saved.merchant!r}"
-        )
-        assert saved.user_key not in keys, (
-            f"This step recorded two expenses sharing key {saved.user_key}"
-        )
-        keys.append(saved.user_key)
-        context._last_saved_expense = saved
-
-
 @when("I send invalid delete commands:")
 def step_send_invalid_delete_commands(context: Any) -> None:
     """Send each invalid delete command and collect replies."""
@@ -149,12 +100,17 @@ def step_saved_confirmation_exists(context: Any, expense_key: str) -> None:
     column: the global id is never user-facing (E12), and seeding with an
     explicit id would take the test-only branch of save() and produce a
     key-less, unaddressable row. Fixtures never hand-write keys.
+
+    The step text names `{expense_key}` and that name is asserted against the
+    key `save()` actually assigned — a key/date mismatch is a failure, not
+    decoration, so the scenario cannot claim a row it did not seed.
     """
     from datetime import date, datetime
     from decimal import Decimal
 
     from expense_report.domain.models import Expense
 
+    saved_keys: list[str] = []
     for row in context.table:
         expense = Expense(
             id=None,
@@ -168,7 +124,14 @@ def step_saved_confirmation_exists(context: Any, expense_key: str) -> None:
             receipt_photo_id=None,
             created_at=datetime.fromisoformat(f"{row['date']}T12:00:00"),
         )
-        context.repository.save(expense)
+        saved = context.repository.save(expense)
+        assert saved.user_key is not None, (
+            f"seed save() returned no key for merchant {saved.merchant!r}"
+        )
+        saved_keys.append(saved.user_key)
+    assert expense_key in saved_keys, (
+        f"Given names key '{expense_key}' but the seeded row(s) got {saved_keys}"
+    )
 
 
 # ── Then steps ─────────────────────────────────────────────────────────────
@@ -212,24 +175,6 @@ def step_expense_still_recorded(context: Any, expense_key: str, user_id: int) ->
     assert matches, f"Expected expense {expense_key} to still exist for user {user_id}"
     owners = {expense.user_id for expense in matches}
     assert owners == {user_id}, f"Expected owner {user_id}, got {sorted(owners)}"
-
-
-@then('the newly recorded expense should have key "{expense_key}"')
-def step_newly_recorded_key(context: Any, expense_key: str) -> None:
-    """The key of the expense the recording step above last saved.
-
-    Pins E10: a soft delete frees a key number, and the next expense on that
-    date must not be handed it again. This names one key — the last row saved
-    by `user … records the following expense:` — which is why that step checks
-    every row it saves (key present, key not already taken) and clears
-    `_last_saved_expense` before it starts, so a scenario that records nothing
-    cannot be satisfied by an earlier scenario's row.
-    """
-    saved = getattr(context, "_last_saved_expense", None)
-    assert saved is not None, "Expected this scenario to record an expense first"
-    assert saved.user_key == expense_key, (
-        f"Expected the new expense to be keyed '{expense_key}', got '{saved.user_key}'"
-    )
 
 
 @then('each delete command should reply with "{expected}"')
