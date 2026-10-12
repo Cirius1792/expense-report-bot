@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Iterable
 from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -68,6 +69,15 @@ def _make_context(
 def _make_queries_mock() -> MagicMock:
     """Create a MagicMock(spec=ExpenseQueryPort) for adapter tests."""
     return MagicMock(spec=ExpenseQueryPort)
+
+
+def _assert_no_global_id(values: Iterable[str | None], expense_id: int) -> None:
+    """Assert that the storage id appears in none of the given user-facing strings."""
+    token = str(expense_id)
+    for value in values:
+        if value is None:
+            continue
+        assert token not in value, f"storage id {token} leaked into user-facing text: {value!r}"
 
 
 class TestStartHandler:
@@ -202,11 +212,11 @@ class TestRemoveHandler:
         update.effective_message.reply_text.assert_awaited_once_with(REMOVE_EXPENSE_PROMPT)
 
     def test_prompt_mentions_delete_usage(self) -> None:
-        """The remove prompt points at /delete <expense_id> and the delete button."""
+        """The remove prompt names /delete <key> and calls it an expense key."""
         from expense_report.adapters.inbound.telegram_bot import REMOVE_EXPENSE_PROMPT
 
-        assert "/delete" in REMOVE_EXPENSE_PROMPT
-        assert "<expense_id>" in REMOVE_EXPENSE_PROMPT
+        assert "/delete <key>" in REMOVE_EXPENSE_PROMPT
+        assert "expense key" in REMOVE_EXPENSE_PROMPT
         assert "Delete" in REMOVE_EXPENSE_PROMPT
 
     def test_no_message_does_nothing(self) -> None:
@@ -278,6 +288,7 @@ class TestPhotoHandler:
         )
         saved = Expense(
             id=1,
+            user_key="20260715-1",
             amount=Decimal("42.50"),
             currency="EUR",
             merchant="Supermarket",
@@ -382,6 +393,7 @@ class TestPdfHandler:
         )
         saved = Expense(
             id=3,
+            user_key="20260730-1",
             amount=Decimal("99.00"),
             currency="EUR",
             merchant="B2B Supplier",
@@ -508,6 +520,7 @@ class TestTextHandler:
         )
         saved = Expense(
             id=7,
+            user_key="20260720-1",
             amount=Decimal("12.50"),
             currency="USD",
             merchant="Coffee Shop",
@@ -536,7 +549,7 @@ class TestTextHandler:
         reply_text = update.effective_message.reply_text.call_args_list[0][0][0]
         assert reply_text == (
             "📄 *Extracted expense:*\n"
-            "Expense #7\n"
+            "Expense 20260720-1\n"
             "Amount: 12.50 USD\n"
             "Merchant: Coffee Shop\n"
             "Date: 2026-07-20\n"
@@ -837,10 +850,10 @@ class TestLabelRoutingIntegrity:
 
 
 class TestSaveConfirmation:
-    """Tests for save confirmation format including ID and delete button."""
+    """Tests for the save confirmation's key line and delete button payload."""
 
-    def test_save_confirmation_includes_id_and_delete_button(self) -> None:
-        """Successful photo save confirmation includes Expense #<id> and delete button."""
+    def test_confirmation_line_shows_key_without_hash(self) -> None:
+        """Photo save confirmation renders 'Expense <key>' with no '#' and keys the button."""
         from expense_report.adapters.inbound.telegram_bot import _make_photo_handler
         from expense_report.ports.expense_recording import ExpenseRecorded
 
@@ -853,6 +866,7 @@ class TestSaveConfirmation:
         )
         saved_expense = Expense(
             id=42,
+            user_key="20260712-1",
             amount=Decimal("3.50"),
             currency="EUR",
             merchant="Central Cafe",
@@ -874,7 +888,8 @@ class TestSaveConfirmation:
         # First reply: summary + inline delete button (unchanged)
         first_call = update.effective_message.reply_text.call_args_list[0]
         reply = first_call[0][0]
-        assert "Expense #42" in reply
+        assert "Expense 20260712-1" in reply
+        assert "#" not in reply
         assert "✅ Saved." in reply
 
         # Check button
@@ -883,13 +898,151 @@ class TestSaveConfirmation:
         buttons = markup.inline_keyboard
         assert len(buttons) == 1
         assert buttons[0][0].text == "🗑️ Delete"
-        assert buttons[0][0].callback_data == "delete:42"
+        assert buttons[0][0].callback_data == "delete:20260712-1"
 
         # Second reply: persistent reply keyboard attached (issue #14)
         from expense_report.adapters.inbound.telegram_bot import REPLY_KEYBOARD
 
         second_call = update.effective_message.reply_text.call_args_list[1]
         assert second_call[1].get("reply_markup") is REPLY_KEYBOARD
+
+    def test_delete_callback_payload_carries_key(self) -> None:
+        """The delete button under a freshly saved expense carries its user key."""
+        from expense_report.adapters.inbound.telegram_bot import _make_photo_handler
+        from expense_report.ports.expense_recording import ExpenseRecorded
+
+        result = ExtractionResult(
+            amount=Decimal("3.50"),
+            currency="EUR",
+            merchant="Central Cafe",
+            date=date(2026, 7, 15),
+            category="food",
+        )
+        saved_expense = Expense(
+            id=7,
+            user_key="20260715-1",
+            amount=Decimal("3.50"),
+            currency="EUR",
+            merchant="Central Cafe",
+            date=date(2026, 7, 15),
+            category="food",
+            user_id=12345,
+            receipt_photo_id="photo-abc-123",
+            created_at=datetime(2026, 7, 15, 12, 0, 0),
+        )
+        recording = MagicMock()
+        recording.record.return_value = ExpenseRecorded(saved_expense, result)
+
+        handler = _make_photo_handler(recording)
+        update = _make_update(photo_file_id="photo-abc-123")
+        context = _make_context()
+
+        asyncio.run(handler(update, context))
+
+        markup = update.effective_message.reply_text.call_args_list[0][1]["reply_markup"]
+        assert markup.inline_keyboard[0][0].callback_data == "delete:20260715-1"
+
+    def test_no_global_id_in_any_user_facing_text(self) -> None:
+        """Invariant: no handler renders the storage id in any user-facing string."""
+        from expense_report.adapters.inbound.telegram_bot import (
+            _make_delete_callback_handler,
+            _make_delete_handler,
+            _make_list_handler,
+            _make_photo_handler,
+            _make_text_handler,
+        )
+        from expense_report.ports.expense_recording import (
+            CorrectionResolved,
+            ExpenseRecorded,
+        )
+
+        # Collision-free: cannot occur in a merchant, amount, date or key.
+        global_id = 987654321
+        result = ExtractionResult(
+            amount=Decimal("3.50"),
+            currency="EUR",
+            merchant="Central Cafe",
+            date=date(2026, 7, 12),
+            category="food",
+        )
+        saved_expense = Expense(
+            id=global_id,
+            user_key="20260712-1",
+            amount=Decimal("3.50"),
+            currency="EUR",
+            merchant="Central Cafe",
+            date=date(2026, 7, 12),
+            category="food",
+            user_id=12345,
+            receipt_photo_id="photo-abc-123",
+            created_at=datetime(2026, 7, 12, 12, 0, 0),
+        )
+
+        # Recording confirmation — photo path: summary text + delete button payload
+        recording = MagicMock()
+        recording.record.return_value = ExpenseRecorded(saved_expense, result)
+        photo_update = _make_update(photo_file_id="photo-abc-123")
+        asyncio.run(_make_photo_handler(recording)(photo_update, _make_context()))
+        photo_call = photo_update.effective_message.reply_text.call_args_list[0]
+        _assert_no_global_id(
+            [photo_call[0][0], photo_call[1]["reply_markup"].inline_keyboard[0][0].callback_data],
+            global_id,
+        )
+
+        # Recording confirmation — correction-resolved path: same two strings
+        recording = MagicMock()
+        recording.record.return_value = CorrectionResolved(saved_expense, result)
+        text_update = _make_update(text="Cafe EUR 3.50")
+        asyncio.run(_make_text_handler(recording, {})(text_update, MagicMock()))
+        resolved_call = text_update.effective_message.reply_text.call_args_list[0]
+        _assert_no_global_id(
+            [
+                resolved_call[0][0],
+                resolved_call[1]["reply_markup"].inline_keyboard[0][0].callback_data,
+            ],
+            global_id,
+        )
+
+        # /list month view
+        queries = _make_queries_mock()
+        queries.discover_periods.return_value = PeriodSummary(
+            periods={2026: {7}}, active_year=2026, active_month=7
+        )
+        queries.get_month_expenses.return_value = [saved_expense]
+        list_update = _make_update()
+        asyncio.run(_make_list_handler(queries)(list_update, MagicMock()))
+        _assert_no_global_id([list_update.effective_message.reply_text.call_args[0][0]], global_id)
+
+        # /delete usage reply (no argument)
+        usage_update = _make_update(text="/delete")
+        asyncio.run(_make_delete_handler(_make_queries_mock())(usage_update, MagicMock()))
+        _assert_no_global_id([usage_update.effective_message.reply_text.call_args[0][0]], global_id)
+
+        # /delete miss reply (well-formed key, nothing deleted)
+        queries = _make_queries_mock()
+        queries.delete_expense.return_value = DeletionResult(status="not_found")
+        miss_update = _make_update(text="/delete 20260712-1")
+        asyncio.run(_make_delete_handler(queries)(miss_update, MagicMock()))
+        _assert_no_global_id([miss_update.effective_message.reply_text.call_args[0][0]], global_id)
+
+        # /delete hit reply (echoes the deleted expense)
+        queries = _make_queries_mock()
+        queries.delete_expense.return_value = DeletionResult(
+            status="deleted", deleted=saved_expense
+        )
+        hit_update = _make_update(text="/delete 20260712-1")
+        asyncio.run(_make_delete_handler(queries)(hit_update, MagicMock()))
+        _assert_no_global_id([hit_update.effective_message.reply_text.call_args[0][0]], global_id)
+
+        # delete button callback reply (strikethrough edit of the confirmation)
+        callback_update = _make_callback_update(callback_data="delete:20260712-1")
+        callback_update.callback_query.message = MagicMock()
+        callback_update.callback_query.message.text = "Expense 20260712-1"
+        callback_update.callback_query.message.caption = None
+        asyncio.run(_make_delete_callback_handler(queries)(callback_update, MagicMock()))
+        _assert_no_global_id(
+            [callback_update.callback_query.edit_message_text.call_args[1]["text"]], global_id
+        )
 
 
 class TestReportHandler:
@@ -1089,6 +1242,7 @@ class TestCorrectionFlow:
         )
         saved_expense = Expense(
             id=42,
+            user_key="20260720-1",
             amount=Decimal("15.00"),
             currency="EUR",
             merchant="Cafe",
@@ -1116,7 +1270,7 @@ class TestCorrectionFlow:
         )
         reply_text = update.effective_message.reply_text.call_args_list[0][0][0]
         assert "Updated and saved" in reply_text
-        assert "Expense #42" in reply_text
+        assert "Expense 20260720-1" in reply_text
         assert "Cafe" in reply_text
 
         # Second reply: persistent reply keyboard attached (issue #14)
@@ -1225,6 +1379,7 @@ class TestListHandler:
         queries.get_month_expenses.return_value = [
             Expense(
                 id=1,
+                user_key="20260710-1",
                 amount=Decimal("42.50"),
                 currency="EUR",
                 merchant="Supermarket",
@@ -1236,6 +1391,7 @@ class TestListHandler:
             ),
             Expense(
                 id=2,
+                user_key="20260720-1",
                 amount=Decimal("12.50"),
                 currency="EUR",
                 merchant="Coffee Shop",
@@ -1282,6 +1438,7 @@ class TestListHandler:
         queries.get_month_expenses.return_value = [
             Expense(
                 id=1,
+                user_key="20260710-1",
                 amount=Decimal("42.50"),
                 currency="EUR",
                 merchant="Shop",
@@ -1328,6 +1485,7 @@ class TestListHandler:
         queries.get_month_expenses.return_value = [
             Expense(
                 id=2,
+                user_key="20260701-1",
                 amount=Decimal("10.00"),
                 currency="EUR",
                 merchant="Shop",
@@ -1389,6 +1547,7 @@ class TestListHandler:
         queries.get_month_expenses.return_value = [
             Expense(
                 id=3,
+                user_key="20251201-1",
                 amount=Decimal("15.00"),
                 currency="EUR",
                 merchant="Old Shop",
@@ -1443,13 +1602,14 @@ class TestListHandler:
         queries.discover_periods.assert_called_once_with(99999)
         queries.get_month_expenses.assert_called_once_with(99999, 2026, 7)
 
-    def test_format_month_view_includes_expense_ids(self) -> None:
-        """Month view shows integer expense IDs for /delete reference."""
+    def test_month_view_leads_each_row_with_key(self) -> None:
+        """Month view rows lead with '#<user_key>' so the row reads addressable."""
         from expense_report.adapters.inbound.telegram_bot import _format_month_view
 
         expenses = [
             Expense(
                 id=42,
+                user_key="20260710-1",
                 amount=Decimal("42.50"),
                 currency="EUR",
                 merchant="Supermarket",
@@ -1463,7 +1623,32 @@ class TestListHandler:
 
         text = _format_month_view(expenses, 2026, 7)
 
-        assert "#42" in text
+        assert "#20260710-1" in text
+
+    def test_month_view_renders_placeholder_for_missing_key(self) -> None:
+        """An unbackfilled row renders '-' in the key cell and never its storage id."""
+        from expense_report.adapters.inbound.telegram_bot import _format_month_view
+
+        expenses = [
+            Expense(
+                id=42,
+                user_key=None,
+                amount=Decimal("9.00"),
+                currency="EUR",
+                merchant="Supermarket",
+                date=date(2026, 7, 10),
+                category=None,
+                user_id=12345,
+                receipt_photo_id=None,
+                created_at=datetime(2026, 7, 10, 12, 0, 0),
+            ),
+        ]
+
+        text = _format_month_view(expenses, 2026, 7)
+        row = next(line for line in text.splitlines() if "Supermarket" in line)
+
+        assert row.startswith("#- ")
+        assert "42" not in row
 
 
 def _make_callback_update(
@@ -1499,6 +1684,7 @@ class TestListCallbackHandler:
         queries.get_month_expenses.return_value = [
             Expense(
                 id=4,
+                user_key="20260305-1",
                 amount=Decimal("30.00"),
                 currency="EUR",
                 merchant="Book Store",
@@ -1548,6 +1734,7 @@ class TestListCallbackHandler:
         queries.get_year_expenses.return_value = [
             Expense(
                 id=5,
+                user_key="20251201-1",
                 amount=Decimal("10.00"),
                 currency="EUR",
                 merchant="Old Shop",
@@ -1559,6 +1746,7 @@ class TestListCallbackHandler:
             ),
             Expense(
                 id=6,
+                user_key="20251210-1",
                 amount=Decimal("5.00"),
                 currency="EUR",
                 merchant="Another",
@@ -1654,6 +1842,7 @@ class TestDeleteCallbackHandler:
         mock_queries = _make_queries_mock()
         deleted_expense = Expense(
             id=1,
+            user_key="20260712-1",
             amount=Decimal("3.50"),
             currency="EUR",
             merchant="Central Cafe",
@@ -1663,12 +1852,14 @@ class TestDeleteCallbackHandler:
             receipt_photo_id=None,
             created_at=datetime(2026, 7, 12, 12, 0, 0),
         )
-        mock_queries.delete_expense.return_value = DeletionResult(deleted=deleted_expense)
+        mock_queries.delete_expense.return_value = DeletionResult(
+            status="deleted", deleted=deleted_expense
+        )
 
         handler = _make_delete_callback_handler(mock_queries)
         update = MagicMock()
         query = MagicMock()
-        query.data = "delete:1"
+        query.data = "delete:20260712-1"
         query.from_user = MagicMock()
         query.from_user.id = 12345
         query.answer = AsyncMock()
@@ -1704,12 +1895,12 @@ class TestDeleteCallbackHandler:
         from expense_report.adapters.inbound.telegram_bot import _make_delete_callback_handler
 
         mock_queries = _make_queries_mock()
-        mock_queries.delete_expense.return_value = DeletionResult(deleted=None)
+        mock_queries.delete_expense.return_value = DeletionResult(status="not_found")
 
         handler = _make_delete_callback_handler(mock_queries)
         update = MagicMock()
         query = MagicMock()
-        query.data = "delete:99"
+        query.data = "delete:20260718-9"
         query.from_user = MagicMock()
         query.from_user.id = 12345
         query.answer = AsyncMock()
@@ -1727,17 +1918,60 @@ class TestDeleteCallbackHandler:
         # Should NOT edit the message
         query.edit_message_text.assert_not_awaited()
 
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            "delete:",
+            "delete:42",
+            "delete:#20260718-1",
+            "delete:20261340-1",
+        ],
+    )
+    def test_delete_callback_malformed_payload_logs_warning_and_ignores(
+        self, payload: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A malformed delete payload delegates; the adapter warns and stays silent."""
+        from expense_report.adapters.inbound.telegram_bot import _make_delete_callback_handler
+
+        mock_queries = _make_queries_mock()
+        mock_queries.delete_expense.return_value = DeletionResult(status="invalid_key")
+        handler = _make_delete_callback_handler(mock_queries)
+
+        caplog.set_level(logging.WARNING)
+
+        update = MagicMock()
+        query = MagicMock()
+        query.data = payload
+        query.from_user = MagicMock()
+        query.from_user.id = 12345
+        query.answer = AsyncMock()
+        query.edit_message_text = AsyncMock()
+        query.message = MagicMock()
+        query.message.text = "Some text"
+        update.callback_query = query
+        context = MagicMock()
+
+        asyncio.run(handler(update, context))
+
+        mock_queries.delete_expense.assert_called_once_with(12345, payload.split(":", 1)[1])
+        query.edit_message_text.assert_not_awaited()
+
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert warnings[0].message == f"Invalid delete callback_data from user 12345: {payload!r}"
+
 
 class TestDeleteHandler:
     """Tests for /delete command handler."""
 
-    def test_delete_success_replies_with_audit_summary(self) -> None:
-        """Successful /delete replies with deleted expense details."""
+    def test_delete_handler_valid_key_deletes_and_echoes_key(self) -> None:
+        """Well-formed key: the port gets the key string and the reply echoes it."""
         from expense_report.adapters.inbound.telegram_bot import _make_delete_handler
 
         mock_queries = _make_queries_mock()
         deleted_expense = Expense(
             id=42,
+            user_key="20260710-1",
             amount=Decimal("42.50"),
             currency="EUR",
             merchant="Supermarket",
@@ -1747,62 +1981,109 @@ class TestDeleteHandler:
             receipt_photo_id=None,
             created_at=datetime(2026, 7, 10, 12, 0, 0),
         )
-        mock_queries.delete_expense.return_value = DeletionResult(deleted=deleted_expense)
+        mock_queries.delete_expense.return_value = DeletionResult(
+            status="deleted", deleted=deleted_expense
+        )
 
         handler = _make_delete_handler(mock_queries)
-        update = _make_update(text="/delete 42")
+        update = _make_update(text="/delete 20260710-1")
         context = MagicMock()
 
         asyncio.run(handler(update, context))
 
         call_args = update.effective_message.reply_text.call_args
         reply = call_args[0][0]
-        assert reply == "🗑️ Deleted expense #42: Supermarket — 42.50 EUR — 2026-07-10"
-        mock_queries.delete_expense.assert_called_once_with(12345, 42)
+        assert reply == "🗑️ Deleted expense 20260710-1: Supermarket — 42.50 EUR — 2026-07-10"
+        mock_queries.delete_expense.assert_called_once_with(12345, "20260710-1")
 
-    def test_delete_not_found_replies_with_not_found_message(self) -> None:
-        """Non-existent expense /delete replies with not found."""
+    def test_delete_handler_unknown_key_replies_not_found_wording(self) -> None:
+        """Well-formed but absent key replies with the miss wording verbatim."""
         from expense_report.adapters.inbound.telegram_bot import _make_delete_handler
 
         mock_queries = _make_queries_mock()
-        mock_queries.delete_expense.return_value = DeletionResult(deleted=None)
+        mock_queries.delete_expense.return_value = DeletionResult(status="not_found")
 
         handler = _make_delete_handler(mock_queries)
-        update = _make_update(text="/delete 99")
+        update = _make_update(text="/delete 20260718-3")
         context = MagicMock()
 
         asyncio.run(handler(update, context))
 
         reply = update.effective_message.reply_text.call_args[0][0]
-        assert "Expense #99 was not found." == reply
+        assert "Expense 20260718-3 was not found." == reply
+        mock_queries.delete_expense.assert_called_once_with(12345, "20260718-3")
 
-    def test_delete_invalid_format_returns_usage(self) -> None:
-        """Invalid /delete formats all return usage message."""
+    @pytest.mark.parametrize(
+        "command,key",
+        [
+            ("/delete abc", "abc"),
+            ("/delete #20260718-1", "#20260718-1"),
+            ("/delete -1", "-1"),
+        ],
+    )
+    def test_delete_handler_malformed_key_replies_usage_from_status(
+        self, command: str, key: str
+    ) -> None:
+        """A malformed key argument delegates; the usage reply comes from status."""
         from expense_report.adapters.inbound.telegram_bot import _make_delete_handler
 
         mock_queries = _make_queries_mock()
+        mock_queries.delete_expense.return_value = DeletionResult(status="invalid_key")
         handler = _make_delete_handler(mock_queries)
 
-        invalid_inputs = ["/delete", "/delete abc", "/delete 42 extra"]
-        for cmd in invalid_inputs:
-            update = _make_update(text=cmd)
-            context = MagicMock()
-            asyncio.run(handler(update, context))
-            reply = update.effective_message.reply_text.call_args[0][0]
-            assert reply == "Usage: /delete <expense_id>", f"Failed for '{cmd}', got: {reply}"
-
-    def test_delete_non_positive_id_returns_usage(self) -> None:
-        """Non-positive ids like /delete 0 return usage."""
-        from expense_report.adapters.inbound.telegram_bot import _make_delete_handler
-
-        mock_queries = _make_queries_mock()
-        handler = _make_delete_handler(mock_queries)
-
-        update = _make_update(text="/delete 0")
+        update = _make_update(text=command)
         context = MagicMock()
         asyncio.run(handler(update, context))
+
         reply = update.effective_message.reply_text.call_args[0][0]
-        assert reply == "Usage: /delete <expense_id>"
+        assert reply == "Usage: /delete <key>"
+        mock_queries.delete_expense.assert_called_once_with(12345, key)
+
+    def test_delete_handler_impossible_date_key_replies_usage(self) -> None:
+        """A regex-valid key whose 8 digits are not a real date delegates and is rejected."""
+        from expense_report.adapters.inbound.telegram_bot import _make_delete_handler
+
+        mock_queries = _make_queries_mock()
+        mock_queries.delete_expense.return_value = DeletionResult(status="invalid_key")
+        handler = _make_delete_handler(mock_queries)
+
+        update = _make_update(text="/delete 20261340-1")
+        context = MagicMock()
+        asyncio.run(handler(update, context))
+
+        reply = update.effective_message.reply_text.call_args[0][0]
+        assert reply == "Usage: /delete <key>"
+        mock_queries.delete_expense.assert_called_once_with(12345, "20261340-1")
+
+    def test_delete_handler_blank_argument_replies_usage_without_calling_the_port(self) -> None:
+        """A trailing-space argument yields no second token, so the port is never called."""
+        from expense_report.adapters.inbound.telegram_bot import _make_delete_handler
+
+        mock_queries = _make_queries_mock()
+        handler = _make_delete_handler(mock_queries)
+
+        update = _make_update(text="/delete ")
+        context = MagicMock()
+        asyncio.run(handler(update, context))
+
+        reply = update.effective_message.reply_text.call_args[0][0]
+        assert reply == "Usage: /delete <key>"
+        mock_queries.delete_expense.assert_not_called()
+
+    def test_delete_handler_no_argument_replies_usage(self) -> None:
+        """/delete with no argument replies with the usage message."""
+        from expense_report.adapters.inbound.telegram_bot import _make_delete_handler
+
+        mock_queries = _make_queries_mock()
+        handler = _make_delete_handler(mock_queries)
+
+        update = _make_update(text="/delete")
+        context = MagicMock()
+        asyncio.run(handler(update, context))
+
+        reply = update.effective_message.reply_text.call_args[0][0]
+        assert reply == "Usage: /delete <key>"
+        mock_queries.delete_expense.assert_not_called()
 
     def test_delete_no_effective_message_returns_silently(self) -> None:
         """Handler returns silently when effective_message is None."""

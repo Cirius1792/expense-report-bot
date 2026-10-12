@@ -29,6 +29,13 @@ def _stub_real_migration(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def _saved_expense_line(output: str) -> str:
+    """The single ``Saved expense:`` line the CLI printed."""
+    lines = [line for line in output.splitlines() if line.startswith("Saved expense:")]
+    assert len(lines) == 1, f"Expected exactly one Saved expense line, got {lines}"
+    return lines[0]
+
+
 def _make_pdf(num_pages: int) -> bytes:
     """Generate an in-memory multi-page PDF with Pillow (no binary fixtures)."""
     buf = BytesIO()
@@ -165,11 +172,10 @@ class TestMainSociable:
             "  Category: food\n"
             "  Complete: True\n"
             "\n"
-            "Saved expense: Expense(id=1, amount=Decimal('15.00'), currency='EUR',"
-            " merchant='Restaurant', date=datetime.date(2026, 7, 15),"
-            " category='food', user_id=999999999, receipt_photo_id=None,"
-            " created_at=datetime.datetime(2026, 7, 15, 12, 0), deleted_at=None)\n"
+            "Saved expense: 20260715-1 — Restaurant — 15.00 EUR — 2026-07-15\n"
         )
+        assert "id=" not in captured.out
+        assert "Expense(" not in captured.out
 
         # Assert: expense was actually saved to the database
         from expense_report.adapters.out.sqlite_repository import (
@@ -186,6 +192,7 @@ class TestMainSociable:
         assert saved.date == date(2026, 7, 15)
         assert saved.category == "food"
         assert saved.user_id == 999999999
+        assert str(saved.id) not in _saved_expense_line(captured.out).split()
 
     @patch.dict(
         os.environ,
@@ -256,6 +263,10 @@ class TestMainSociable:
         captured = capsys.readouterr()
         assert "Extraction result from" in captured.out
         assert "29.99" in captured.out
+        assert _saved_expense_line(captured.out) == (
+            "Saved expense: 20260710-1 — Store — 29.99 USD — 2026-07-10"
+        )
+        assert "id=" not in captured.out
 
         # Assert: expense was actually saved to the database
         from expense_report.adapters.out.sqlite_repository import (
@@ -281,7 +292,9 @@ class TestMainSociable:
         },
         clear=False,
     )
-    def test_text_flow_translates_arguments_to_record_command(self) -> None:
+    def test_text_flow_translates_arguments_to_record_command(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """extract-from-text constructs correct RecordExpense command via use case."""
         from expense_report.domain.models import Expense, ExtractionResult
         from expense_report.domain.source_types import SourceType
@@ -300,6 +313,7 @@ class TestMainSociable:
         )
         saved = Expense(
             id=9,
+            user_key="20260715-1",
             amount=Decimal("15.00"),
             currency="EUR",
             merchant="Restaurant",
@@ -340,6 +354,9 @@ class TestMainSociable:
                 mode=RecordingMode.ONE_SHOT,
                 receipt_photo_id=None,
             )
+        )
+        assert _saved_expense_line(capsys.readouterr().out) == (
+            "Saved expense: 20260715-1 — Restaurant — 15.00 EUR — 2026-07-15"
         )
 
     def test_text_flow_renders_incomplete_without_saving(
@@ -393,6 +410,7 @@ class TestMainSociable:
     def test_image_flow_translates_arguments_to_record_command(
         self,
         tmp_path: pathlib.Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """extract-from-image constructs correct RecordExpense command via use case."""
         from expense_report.domain.models import Expense, ExtractionResult
@@ -415,6 +433,7 @@ class TestMainSociable:
         )
         saved = Expense(
             id=9,
+            user_key="20260710-1",
             amount=Decimal("29.99"),
             currency="USD",
             merchant="Store",
@@ -455,6 +474,9 @@ class TestMainSociable:
                 mode=RecordingMode.ONE_SHOT,
                 receipt_photo_id=None,
             )
+        )
+        assert _saved_expense_line(capsys.readouterr().out) == (
+            "Saved expense: 20260710-1 — Store — 29.99 USD — 2026-07-10"
         )
 
     def test_image_flow_renders_incomplete_without_saving(
@@ -591,7 +613,10 @@ class TestMainSociable:
         captured = capsys.readouterr()
         assert "Extraction result from" in captured.out
         assert "42.50" in captured.out
-        assert "Saved expense:" in captured.out
+        assert _saved_expense_line(captured.out) == (
+            "Saved expense: 20260711-1 — PDF Shop — 42.50 EUR — 2026-07-11"
+        )
+        assert "id=" not in captured.out
 
         from expense_report.adapters.out.sqlite_repository import (
             SqliteExpenseRepository,
@@ -608,6 +633,7 @@ class TestMainSociable:
     def test_pdf_flow_translates_arguments_to_record_command(
         self,
         tmp_path: pathlib.Path,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """extract-from-pdf constructs correct RecordExpense command via use case."""
         from expense_report.domain.models import Expense, ExtractionResult
@@ -630,6 +656,7 @@ class TestMainSociable:
         )
         saved = Expense(
             id=9,
+            user_key="20260711-1",
             amount=Decimal("42.50"),
             currency="EUR",
             merchant="PDF Shop",
@@ -670,6 +697,9 @@ class TestMainSociable:
                 mode=RecordingMode.ONE_SHOT,
                 receipt_photo_id=None,
             )
+        )
+        assert _saved_expense_line(capsys.readouterr().out) == (
+            "Saved expense: 20260711-1 — PDF Shop — 42.50 EUR — 2026-07-11"
         )
 
     def test_pdf_rejection_prints_reason_and_exits_one(

@@ -11,13 +11,15 @@ Feature: Monthly Expense List (Interactive)
   Scenario: /list shows current month with total and only months that have expenses
     Given the following expenses exist:
       | amount | currency | merchant    | date       | category |
-      | 42.50  | EUR      | Supermarket  | 2026-07-10 | food     |
-      | 12.50  | EUR      | Coffee Shop  | 2026-07-20 | food     |
-      | 30.00  | EUR      | Book Store   | 2026-03-05 | shopping |
+      | 42.50  | EUR      | Supermarket | 2026-07-10 | food     |
+      | 12.50  | EUR      | Coffee Shop | 2026-07-10 | food     |
+      | 30.00  | EUR      | Book Store  | 2026-03-05 | shopping |
     When I send the command "/list"
     Then the message shows expenses for July 2026
-    And the message lists expense "#1" for merchant "Supermarket"
-    And the message lists expense "#2" for merchant "Coffee Shop"
+    And the message lists expense "#20260710-1" for merchant "Supermarket"
+    And the message lists expense "#20260710-2" for merchant "Coffee Shop"
+    # every row: a well-formed key cell, distinct from every other row's key, prefixed with that row's own date column, and as many rows as the "(N expenses)" claim
+    And the listing shows a key for every expense row
     And the message shows the total "55.00"
     And the bot shows buttons labeled "2026", "Jul", and "Mar"
     And the bot does not show a button labeled "2025"
@@ -33,19 +35,26 @@ Feature: Monthly Expense List (Interactive)
   @story-13
   Scenario: /list isolates expenses by user
     Given the following expenses exist:
-      | amount | currency | merchant       | date       | user_id |
-      | 50.00  | EUR      | User 123 Shop  | 2026-07-01 | 123     |
-      | 25.00  | EUR      | User 456 Shop  | 2026-07-02 | 456     |
+      | amount | currency | merchant      | date       | user_id |
+      | 50.00  | EUR      | User 123 Shop | 2026-07-01 | 123     |
+      | 25.00  | EUR      | User 456 Shop | 2026-07-01 | 456     |
     When user 123 sends the command "/list"
     Then the message shows expenses for user 123
+    And the message lists expense "#20260701-1" for merchant "User 123 Shop"
+    And the listing shows a key for every expense row
     And the bot shows buttons labeled "2026" and "Jul"
+
+    When user 456 sends the command "/list"
+    Then the message shows expenses for user 456
+    And the message lists expense "#20260701-1" for merchant "User 456 Shop"
+    And the listing shows a key for every expense row
 
   @story-14
   Scenario: Tapping a month button navigates to that month
     Given the following expenses exist:
       | amount | currency | merchant    | date       | category |
-      | 42.50  | EUR      | Supermarket  | 2026-07-10 | food     |
-      | 30.00  | EUR      | Book Store   | 2026-03-05 | shopping |
+      | 42.50  | EUR      | Supermarket | 2026-07-10 | food     |
+      | 30.00  | EUR      | Book Store  | 2026-03-05 | shopping |
     Given the list view for the current month is displayed
     When the user selects month "Mar"
     Then the message updates to show expenses for March 2026
@@ -55,9 +64,9 @@ Feature: Monthly Expense List (Interactive)
   Scenario: Tapping a year button switches to that year and shows year total
     Given the following expenses exist:
       | amount | currency | merchant    | date       | category |
-      | 42.50  | EUR      | Supermarket  | 2026-07-10 | food     |
-      | 30.00  | EUR      | Book Store   | 2026-03-05 | shopping |
-      | 15.00  | EUR      | Old Shop     | 2025-12-01 | shopping |
+      | 42.50  | EUR      | Supermarket | 2026-07-10 | food     |
+      | 30.00  | EUR      | Book Store  | 2026-03-05 | shopping |
+      | 15.00  | EUR      | Old Shop    | 2025-12-01 | shopping |
     Given the list view for the current month is displayed
     When the user selects year "2025"
     Then the message shows the year total "15.00"
@@ -67,9 +76,9 @@ Feature: Monthly Expense List (Interactive)
   Scenario: Previous year button appears only when expenses exist in that year
     Given the following expenses exist:
       | amount | currency | merchant    | date       | category |
-      | 42.50  | EUR      | Supermarket  | 2026-07-10 | food     |
-      | 15.00  | EUR      | Old Shop     | 2025-12-01 | shopping |
-      | 20.00  | EUR      | Last Jan     | 2025-01-15 | food     |
+      | 42.50  | EUR      | Supermarket | 2026-07-10 | food     |
+      | 15.00  | EUR      | Old Shop    | 2025-12-01 | shopping |
+      | 20.00  | EUR      | Last Jan    | 2025-01-15 | food     |
     When I send the command "/list"
     Then the bot shows buttons labeled "2026", "2025", and "Jul"
     And the bot does not show a button labeled "Jan"

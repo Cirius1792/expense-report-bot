@@ -29,18 +29,26 @@ class SqliteExpenseRepository:
         self._conn.row_factory = sqlite3.Row
 
     def save(self, expense: Expense) -> Expense:
-        """Persist an expense record.
+        """Persist an expense record and return it with its assigned user_key.
 
-        If expense.id is None, SQLite assigns an auto-increment integer id.
-        If expense.id is set, it is used as-is (INSERT with explicit id).
+        The per-person key (`YYYYMMDD-n`, prefixed with the Expense's own date)
+        is computed inside this INSERT statement: one statement holds the write
+        lock for the whole key count, so no SELECT-then-INSERT window exists
+        (ADR 0016). The count includes soft-deleted rows, so a number freed by a
+        soft delete is never handed out again.
+
+        If expense.id is None, SQLite assigns the auto-increment integer id.
+        If expense.id is set, it is used as-is and the caller's user_key is
+        stored as given (the pre-backfill state keeps it NULL).
         """
         if expense.id is not None:
+            # TODO: test-only scaffolding — replacing seeding is separate later work
             self._conn.execute(
                 """
-                INSERT OR REPLACE INTO expenses
+                INSERT INTO expenses
                     (id, amount, currency, merchant, date, category,
-                     user_id, receipt_photo_id, created_at, deleted_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     user_id, receipt_photo_id, created_at, deleted_at, user_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     expense.id,
@@ -53,57 +61,53 @@ class SqliteExpenseRepository:
                     expense.receipt_photo_id,
                     expense.created_at.isoformat(),
                     expense.deleted_at.isoformat() if expense.deleted_at is not None else None,
+                    expense.user_key,
                 ),
             )
             self._conn.commit()
-            logger.info("Saved expense %s for user %s", expense.id, expense.user_id)
-            return Expense(
-                id=expense.id,
-                amount=expense.amount,
-                currency=expense.currency,
-                merchant=expense.merchant,
-                date=expense.date,
-                category=expense.category,
-                user_id=expense.user_id,
-                receipt_photo_id=expense.receipt_photo_id,
-                created_at=expense.created_at,
-                deleted_at=expense.deleted_at,
+            saved = self._read_back(expense.id)
+            logger.info(
+                "Saved expense %s (key %s) for user %s",
+                expense.id,
+                saved.user_key,
+                expense.user_id,
             )
-        else:
-            cursor = self._conn.execute(
-                """
-                INSERT INTO expenses
-                    (amount, currency, merchant, date, category,
-                     user_id, receipt_photo_id, created_at, deleted_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    str(expense.amount),
-                    expense.currency,
-                    expense.merchant,
-                    expense.date.isoformat(),
-                    expense.category,
-                    expense.user_id,
-                    expense.receipt_photo_id,
-                    expense.created_at.isoformat(),
-                    expense.deleted_at.isoformat() if expense.deleted_at is not None else None,
-                ),
+            return saved
+
+        cursor = self._conn.execute(
+            """
+            INSERT INTO expenses
+                (amount, currency, merchant, date, category,
+                 user_id, receipt_photo_id, created_at, deleted_at, user_key)
+            VALUES (
+                :amount, :currency, :merchant, :date, :category,
+                :user_id, :receipt_photo_id, :created_at, :deleted_at,
+                substr(:date,1,4) || substr(:date,6,2) || substr(:date,9,2) || '-' ||
+                ((SELECT count(id) FROM expenses WHERE user_id = :user_id AND date = :date) + 1)
             )
-            self._conn.commit()
-            new_id = cursor.lastrowid
-            logger.info("Saved expense %s for user %s", new_id, expense.user_id)
-            return Expense(
-                id=new_id,
-                amount=expense.amount,
-                currency=expense.currency,
-                merchant=expense.merchant,
-                date=expense.date,
-                category=expense.category,
-                user_id=expense.user_id,
-                receipt_photo_id=expense.receipt_photo_id,
-                created_at=expense.created_at,
-                deleted_at=expense.deleted_at,
-            )
+            """,
+            {
+                "amount": str(expense.amount),
+                "currency": expense.currency,
+                "merchant": expense.merchant,
+                "date": expense.date.isoformat(),
+                "category": expense.category,
+                "user_id": expense.user_id,
+                "receipt_photo_id": expense.receipt_photo_id,
+                "created_at": expense.created_at.isoformat(),
+                "deleted_at": expense.deleted_at.isoformat()
+                if expense.deleted_at is not None
+                else None,
+            },
+        )
+        self._conn.commit()
+        new_id = cursor.lastrowid
+        assert new_id is not None
+        saved = self._read_back(new_id)
+        logger.info(
+            "Saved expense %s (key %s) for user %s", new_id, saved.user_key, expense.user_id
+        )
+        return saved
 
     def get_by_id(self, expense_id: int) -> Expense | None:
         """Retrieve a single expense by its unique identifier.
@@ -194,35 +198,45 @@ class SqliteExpenseRepository:
         )
         return total
 
-    def delete_by_id(self, user_id: int, expense_id: int) -> Expense | None:
-        """Logically delete an expense by its integer id, scoped to the given user.
+    def delete_by_user_key(self, user_id: int, user_key: str) -> Expense | None:
+        """Logically delete the expense a person addressed by their own key.
 
         Marks the row with a deleted_at timestamp (ADR 0011); the row is never
-        physically removed. Returns the deleted Expense for the caller to
-        format a success message, or None if no matching live expense exists
-        (unknown id, other user, or already deleted).
+        physically removed. Ownership is part of the SELECT predicate, so another
+        person's identically-keyed row is never even fetched. The UPDATE then binds
+        to the id that SELECT resolved, so it stamps exactly the row that was read —
+        it does not depend on (user_id, user_key) naming one row, which is what the
+        UNIQUE index used to guarantee (ADR 0018). Returns the deleted Expense
+        for the caller to format a success message, or None if no matching live
+        expense exists (unknown key, other person, or already deleted).
         """
         row = self._conn.execute(
-            "SELECT * FROM expenses WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
-            (expense_id, user_id),
+            "SELECT * FROM expenses WHERE user_id = ? AND user_key = ? AND deleted_at IS NULL",
+            (user_id, user_key),
         ).fetchone()
 
         if row is None:
             logger.info(
-                "Expense %s not found for user %s — nothing to delete",
-                expense_id,
+                "Expense key %s not found for user %s — nothing to delete",
+                user_key,
                 user_id,
             )
             return None
 
         deleted_at = datetime.now()
         self._conn.execute(
-            "UPDATE expenses SET deleted_at = ? WHERE id = ? AND user_id = ?",
-            (deleted_at.isoformat(), expense_id, user_id),
+            "UPDATE expenses SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+            (deleted_at.isoformat(), row["id"]),
         )
         self._conn.commit()
 
-        logger.info("Deleted expense %s for user %s at %s", expense_id, user_id, deleted_at)
+        logger.info(
+            "Deleted expense %s (key %s) for user %s at %s",
+            row["id"],
+            user_key,
+            user_id,
+            deleted_at,
+        )
 
         return self._row_to_expense(row)
 
@@ -243,4 +257,16 @@ class SqliteExpenseRepository:
             deleted_at=(
                 datetime.fromisoformat(deleted_at_raw) if deleted_at_raw is not None else None
             ),
+            user_key=row["user_key"],
         )
+
+    def _read_back(self, row_id: int) -> Expense:
+        """Read the row just written, so the returned Expense carries the stored key.
+
+        This is a read, not a second key computation: the key was fixed inside
+        the INSERT above (ADR 0016).
+        """
+        row = self._conn.execute("SELECT * FROM expenses WHERE id = ?", (row_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"row {row_id} missing after INSERT")
+        return self._row_to_expense(row)

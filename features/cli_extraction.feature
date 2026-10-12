@@ -17,6 +17,8 @@ Feature: CLI Expense Extraction and Storage
     And the extracted date should be "2026-07-15"
     And the extraction should be complete
     And the expense should be saved to the database
+    And the CLI should have printed "Saved expense: 20260715-1 — Autostrade per l'Italia — 3.80 EUR — 2026-07-15"
+    And the CLI output should not contain "id="
 
   @story-2
   Scenario: Extract expense from free-text message via CLI
@@ -28,6 +30,8 @@ Feature: CLI Expense Extraction and Storage
     And the extracted date should be "2026-07-10"
     And the extraction should be complete
     And the expense should be saved to the database
+    And the CLI should have printed "Saved expense: 20260710-1 — Mario's Pizzeria — 15.50 EUR — 2026-07-10"
+    And the CLI output should not contain "id="
 
   @story-2
   Scenario: Extract expense with optional category from text
@@ -38,6 +42,8 @@ Feature: CLI Expense Extraction and Storage
     And the extracted currency should be "USD"
     And the extracted category should be "transport"
     And the expense should be saved to the database
+    And the CLI should have printed "Saved expense: 20260715-1 — Taxi — 25.00 USD — 2026-07-15"
+    And the CLI output should not contain "id="
 
   Scenario: Partial extraction from ambiguous text
     Given the user describes an expense as "something expensive"

@@ -188,8 +188,11 @@ def before_scenario(context: "behave.runner.Context", scenario: "behave.model.Sc
     """Set up fresh test fixtures before each scenario."""
     # Fresh data per scenario; the schema is owned by Liquibase (see before_all).
     # The shared file database keeps its AUTOINCREMENT counter across scenarios,
-    # so reset sqlite_sequence too — otherwise expense IDs keep climbing and the
-    # "Expense #1" assertions fail.
+    # so reset sqlite_sequence too — otherwise ids keep climbing. The wipe is also
+    # what makes key numbering reproducible: the per-person key is a COUNT over
+    # this table, so wiping per scenario pins each scenario's first key to -1.
+    # Fixture infrastructure, not product code: the "no DELETE FROM expenses"
+    # invariant is stated over src/, never here.
     with sqlite3.connect(context.database_path) as connection:
         connection.execute("DELETE FROM expenses")
         connection.execute("DELETE FROM sqlite_sequence WHERE name = 'expenses'")
