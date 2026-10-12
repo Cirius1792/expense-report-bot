@@ -144,6 +144,10 @@ def main() -> None:
     _print_extraction_result(source_label, result)
 
     if isinstance(outcome, ExpenseRecorded):
-        print(f"\nSaved expense: {outcome.expense}")
+        expense = outcome.expense
+        print(
+            f"\nSaved expense: {expense.user_key} — {expense.merchant}"
+            f" — {expense.amount:.2f} {expense.currency} — {expense.date}"
+        )
     else:
         print("\nExtraction incomplete — not saved.")

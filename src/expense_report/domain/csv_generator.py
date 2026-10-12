@@ -14,18 +14,21 @@ from expense_report.domain.models import Expense
 def generate_csv(expenses: list[Expense]) -> str:
     """Generate a CSV string from a list of expenses.
 
-    Headers: date,merchant,category,amount,currency
+    Headers: user_key,date,merchant,category,amount,currency
+    The per-person key (`YYYYMMDD-n`) is the leading column (E6); a `None` key
+    (pre-backfill row) renders as the empty string, i.e. a leading empty field.
     Category is included even if None (empty string in CSV).
     Decimal amounts are formatted with 2 decimal places.
     """
     output = StringIO()
     writer = csv.writer(output, lineterminator="\n")
 
-    writer.writerow(["date", "merchant", "category", "amount", "currency"])
+    writer.writerow(["user_key", "date", "merchant", "category", "amount", "currency"])
 
     for expense in expenses:
         writer.writerow(
             [
+                expense.user_key if expense.user_key is not None else "",
                 expense.date.isoformat(),
                 expense.merchant,
                 expense.category if expense.category is not None else "",

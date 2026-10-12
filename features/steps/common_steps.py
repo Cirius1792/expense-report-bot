@@ -193,10 +193,16 @@ def seed_expense(
     expense_date: str = "2026-07-15",
     category: str | None = None,
 ) -> Expense:
-    """Insert a single expense into the test repository."""
+    """Insert a single expense into the test repository.
+
+    Fixtures never hand-write keys: this seeds with id=None through repository.save,
+    so the row acquires its genuine per-person key (`YYYYMMDD-n`) exactly as product
+    code computes it (ADR 0016).
+    """
     user_id = user_id or context.user_id
     expense = Expense(
         id=None,
+        user_key=None,
         amount=Decimal(amount),
         currency=currency,
         merchant=merchant,

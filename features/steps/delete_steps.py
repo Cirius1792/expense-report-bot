@@ -8,6 +8,17 @@ from unittest.mock import AsyncMock, MagicMock
 
 from behave import given, then, when
 
+
+def _key_year_month(key: str) -> tuple[int, int]:
+    """Year and month of the expense date a `YYYYMMDD-n` key is derived from.
+
+    The key prefix is the Expense's own date (E7), so a key-only lookup
+    resolves the month read without ever consulting the storage id.
+    """
+    digits = key.partition("-")[0]
+    return int(digits[:4]), int(digits[4:6])
+
+
 # ── When steps ─────────────────────────────────────────────────────────────
 
 
@@ -41,15 +52,15 @@ def step_send_invalid_delete_commands(context: Any) -> None:
     context._invalid_delete_replies = replies
 
 
-@when("I tap the delete button for expense #{expense_id:d}")
-def step_tap_delete_button(context: Any, expense_id: int) -> None:
+@when("I tap the delete button for expense {expense_key}")
+def step_tap_delete_button(context: Any, expense_key: str) -> None:
     """Simulate tapping the delete button callback."""
     from expense_report.adapters.inbound.telegram_bot import _make_delete_callback_handler
 
     handler = _make_delete_callback_handler(context.expense_queries)
     update = MagicMock()
     query = MagicMock()
-    query.data = f"delete:{expense_id}"
+    query.data = f"delete:{expense_key}"
     query.from_user = MagicMock()
     query.from_user.id = context.user_id
     query.answer = AsyncMock()
@@ -58,7 +69,7 @@ def step_tap_delete_button(context: Any, expense_id: int) -> None:
     query.edit_message_reply_markup = AsyncMock()
     query.message = MagicMock()
     query.message.text = (
-        f"Extracted expense:\nExpense #{expense_id}\n"
+        f"Extracted expense:\nExpense {expense_key}\n"
         f"Amount: 3.50 EUR\nMerchant: Central Cafe\n"
         f"Date: 2026-07-12\nCategory: food\n\nSaved."
     )
@@ -81,17 +92,29 @@ def step_tap_delete_button(context: Any, expense_id: int) -> None:
 # ── Given steps ────────────────────────────────────────────────────────────
 
 
-@given("a saved confirmation for expense #{expense_id:d} exists:")
-def step_saved_confirmation_exists(context: Any, expense_id: int) -> None:
-    """Seed an expense with a specific id (matching the delete button scenario)."""
+@given("a saved confirmation for expense {expense_key} exists:")
+def step_saved_confirmation_exists(context: Any, expense_key: str) -> None:
+    """Seed an expense that acquires its genuine key through save().
+
+    The table names the expense dates that drive the key and carries no id
+    column: the global id is never user-facing (E12), and seeding with an
+    explicit id would take the test-only branch of save() and produce a
+    key-less, unaddressable row. Fixtures never hand-write keys.
+
+    The step text names `{expense_key}` and that name is asserted against the
+    key `save()` actually assigned — a key/date mismatch is a failure, not
+    decoration, so the scenario cannot claim a row it did not seed.
+    """
     from datetime import date, datetime
     from decimal import Decimal
 
     from expense_report.domain.models import Expense
 
+    saved_keys: list[str] = []
     for row in context.table:
         expense = Expense(
-            id=int(row["id"]),
+            id=None,
+            user_key=None,
             amount=Decimal(row["amount"]),
             currency=row["currency"],
             merchant=row["merchant"],
@@ -101,7 +124,14 @@ def step_saved_confirmation_exists(context: Any, expense_id: int) -> None:
             receipt_photo_id=None,
             created_at=datetime.fromisoformat(f"{row['date']}T12:00:00"),
         )
-        context.repository.save(expense)
+        saved = context.repository.save(expense)
+        assert saved.user_key is not None, (
+            f"seed save() returned no key for merchant {saved.merchant!r}"
+        )
+        saved_keys.append(saved.user_key)
+    assert expense_key in saved_keys, (
+        f"Given names key '{expense_key}' but the seeded row(s) got {saved_keys}"
+    )
 
 
 # ── Then steps ─────────────────────────────────────────────────────────────
@@ -114,19 +144,37 @@ def step_bot_reply_exact(context: Any, text: str) -> None:
     assert reply == text, f"Expected '{text}', got: '{reply}'"
 
 
-@then("expense #{expense_id:d} should no longer be recorded")
-def step_expense_not_recorded(context: Any, expense_id: int) -> None:
-    """Verify expense is not retrievable after deletion."""
-    result = context.repository.get_by_id(expense_id)
-    assert result is None, f"Expected expense #{expense_id} to be deleted"
+@then("expense {expense_key} should no longer be recorded")
+def step_expense_not_recorded(context: Any, expense_key: str) -> None:
+    """Verify the addressed expense is not retrievable after deletion.
+
+    Addressed by key through the month read, never by the storage id.
+    """
+    year, month = _key_year_month(expense_key)
+    matches = [
+        expense
+        for expense in context.repository.get_by_user_and_month(
+            user_id=context.user_id, year=year, month=month
+        )
+        if expense.user_key == expense_key
+    ]
+    assert not matches, f"Expected expense {expense_key} to be deleted"
 
 
-@then("expense #{expense_id:d} should still be recorded for user {user_id:d}")
-def step_expense_still_recorded(context: Any, expense_id: int, user_id: int) -> None:
-    """Verify expense still exists (was not deleted due to user scoping)."""
-    result = context.repository.get_by_id(expense_id)
-    assert result is not None, f"Expected expense #{expense_id} to still exist"
-    assert result.user_id == user_id, f"Expected user {user_id}, got user {result.user_id}"
+@then("expense {expense_key} should still be recorded for user {user_id:d}")
+def step_expense_still_recorded(context: Any, expense_key: str, user_id: int) -> None:
+    """Verify the key-addressed expense is still there, owned by that person."""
+    year, month = _key_year_month(expense_key)
+    matches = [
+        expense
+        for expense in context.repository.get_by_user_and_month(
+            user_id=user_id, year=year, month=month
+        )
+        if expense.user_key == expense_key
+    ]
+    assert matches, f"Expected expense {expense_key} to still exist for user {user_id}"
+    owners = {expense.user_id for expense in matches}
+    assert owners == {user_id}, f"Expected owner {user_id}, got {sorted(owners)}"
 
 
 @then('each delete command should reply with "{expected}"')

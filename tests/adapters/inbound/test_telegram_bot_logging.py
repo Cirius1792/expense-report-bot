@@ -199,6 +199,7 @@ class TestPhotoHandlerLogging:
         )
         saved = Expense(
             id=7,
+            user_key="20260715-1",
             amount=Decimal("42.50"),
             currency="EUR",
             merchant="Supermarket",
@@ -279,6 +280,7 @@ class TestPhotoHandlerLogging:
         )
         saved = Expense(
             id=42,
+            user_key="20260715-1",
             amount=Decimal("42.50"),
             currency="EUR",
             merchant="Supermarket",
@@ -328,6 +330,7 @@ class TestTextHandlerLogging:
         )
         saved_expense = Expense(
             id=7,
+            user_key="20260720-1",
             amount=Decimal("12.50"),
             currency="USD",
             merchant="Coffee Shop",
@@ -381,6 +384,7 @@ class TestTextHandlerLogging:
         )
         saved_expense = Expense(
             id=7,
+            user_key="20260720-1",
             amount=Decimal("12.50"),
             currency="USD",
             merchant="Coffee Shop",
@@ -414,6 +418,50 @@ class TestTextHandlerLogging:
         assert "saved" in messages.lower() or "save" in messages.lower()
         assert source_text not in all_messages
         assert "Coffee Shop" not in all_messages
+
+    def test_saved_expense_log_carries_both_identities(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The save log names the storage id and the user key, so ops can join either."""
+        from expense_report.adapters.inbound.telegram_bot import (
+            _make_text_handler,
+        )
+        from expense_report.ports.expense_recording import (
+            ExpenseRecorded,
+        )
+
+        result = ExtractionResult(
+            amount=Decimal("3.50"),
+            currency="EUR",
+            merchant="Central Cafe",
+            date=date(2026, 7, 12),
+            category="food",
+        )
+        saved_expense = Expense(
+            id=42,
+            user_key="20260712-1",
+            amount=Decimal("3.50"),
+            currency="EUR",
+            merchant="Central Cafe",
+            date=date(2026, 7, 12),
+            category="food",
+            user_id=12345,
+            receipt_photo_id=None,
+            created_at=datetime(2026, 7, 12, 14, 0, 0),
+        )
+        recording = MagicMock()
+        recording.record.return_value = ExpenseRecorded(saved_expense, result)
+
+        handler = _make_text_handler(recording, {})
+        update = _make_update(user_id=12345, text="coffee 3.50 eur")
+        context = MagicMock()
+
+        asyncio.run(handler(update, context))
+
+        saved_logs = [r for r in caplog.records if "Saved expense" in r.message]
+        assert len(saved_logs) == 1
+        assert "42" in saved_logs[0].message
+        assert "key 20260712-1" in saved_logs[0].message
 
     def test_text_handler_logs_no_user_or_message_debug(
         self, caplog: pytest.LogCaptureFixture

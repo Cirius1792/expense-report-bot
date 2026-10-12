@@ -15,6 +15,9 @@ EXPECTED_INTEGRATION: frozenset[str] = frozenset(
         "tests/migrations/test_changelog.py::test_reapplying_changelog_is_no_op",
         "tests/migrations/test_changelog.py::test_legacy_database_gains_deleted_at_without_losing_rows",
         "tests/migrations/test_changelog.py::test_current_schema_database_is_baselined_without_data_loss",
+        "tests/migrations/test_changelog.py::test_backfill_assigns_dense_keys_in_insertion_order",
+        "tests/migrations/test_changelog.py::test_backfill_numbers_soft_deleted_rows_and_preserves_them",
+        "tests/migrations/test_changelog.py::test_backfill_is_idempotent",
         "tests/migrations/test_schema_snapshot.py::test_snapshot_matches_changelog",
     }
 )

@@ -6,6 +6,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock
 
+import pytest
+
 from expense_report.domain.models import Expense
 from expense_report.ports.expense_queries import DeletionResult, PeriodSummary
 
@@ -18,10 +20,12 @@ def _make_expense(
     date_val: date | None = None,
     category: str | None = None,
     user_id: int = 12345,
+    user_key: str | None = "20260701-1",
 ) -> Expense:
     d = date_val or date(2026, 7, 1)
     return Expense(
         id=id,
+        user_key=user_key,
         amount=Decimal(amount),
         currency=currency,
         merchant=merchant,
@@ -255,7 +259,7 @@ class TestGenerateCsvReport:
         result = use_case.generate_csv_report(12345, 2026, 7)
 
         repo.get_by_user_and_month.assert_called_once_with(12345, 2026, 7)
-        assert "date,merchant,category,amount,currency" in result
+        assert "user_key,date,merchant,category,amount,currency" in result
         assert "Shop A" in result
         assert "Shop B" in result
 
@@ -269,7 +273,7 @@ class TestGenerateCsvReport:
 
         result = use_case.generate_csv_report(12345, 2026, 3)
 
-        assert "date,merchant,category,amount,currency" in result
+        assert "user_key,date,merchant,category,amount,currency" in result
         # Header only — no data rows
         lines = result.strip().split("\n")
         assert len(lines) == 1
@@ -287,25 +291,46 @@ class TestDeleteExpense:
         """Returns DeletionResult with the deleted Expense."""
         from expense_report.application.expense_queries import ExpenseQueryUseCase
 
-        e1 = _make_expense(id=42)
+        e1 = _make_expense(id=42, user_key="20260718-3")
         repo = MagicMock()
-        repo.delete_by_id.return_value = e1
+        repo.delete_by_user_key.return_value = e1
         use_case = ExpenseQueryUseCase(repo)
 
-        result = use_case.delete_expense(12345, 42)
+        result = use_case.delete_expense(12345, "20260718-3")
 
-        repo.delete_by_id.assert_called_once_with(12345, 42)
-        assert result == DeletionResult(deleted=e1)
+        repo.delete_by_user_key.assert_called_once_with(12345, "20260718-3")
+        assert result == DeletionResult(status="deleted", deleted=e1)
 
     def test_not_found_returns_none_deleted(self) -> None:
-        """Returns DeletionResult(deleted=None) when not found."""
+        """Returns DeletionResult(status="not_found") when the key addresses no live row."""
         from expense_report.application.expense_queries import ExpenseQueryUseCase
 
         repo = MagicMock()
-        repo.delete_by_id.return_value = None
+        repo.delete_by_user_key.return_value = None
         use_case = ExpenseQueryUseCase(repo)
 
-        result = use_case.delete_expense(12345, 99)
+        result = use_case.delete_expense(12345, "20260718-3")
 
-        repo.delete_by_id.assert_called_once_with(12345, 99)
-        assert result == DeletionResult(deleted=None)
+        repo.delete_by_user_key.assert_called_once_with(12345, "20260718-3")
+        assert result == DeletionResult(status="not_found", deleted=None)
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "20261340-1",  # regex-valid, calendar-invalid
+            "abc",  # shape-invalid
+        ],
+    )
+    def test_delete_expense_rejects_malformed_key_without_touching_repository(
+        self, key: str
+    ) -> None:
+        """A malformed key is rejected in the application: status invalid_key, repo untouched."""
+        from expense_report.application.expense_queries import ExpenseQueryUseCase
+
+        repo = MagicMock()
+        use_case = ExpenseQueryUseCase(repo)
+
+        result = use_case.delete_expense(12345, key)
+
+        assert result == DeletionResult(status="invalid_key")
+        repo.delete_by_user_key.assert_not_called()

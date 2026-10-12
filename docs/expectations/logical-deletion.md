@@ -4,14 +4,26 @@
 > (expectations 2, 6, and the "hard-deletes" statements). The user-facing
 > contract of `/delete`, the delete button, `/list`, `/report`, and CSV is
 > unchanged — only the storage mechanism changes.
+>
+> **Note (2026-10-10):** the "ADR 0010 (user-scoped ids)" references below point at a file
+> that was never written. That decision now lives in ADR 0016 — User-scoped Expense Keys.
+> No renumbering.
+>
+> **Superseded by ADR 0016 (issue #16), 2026-10-11:** the storage mechanism described here still
+> holds, but the *names* below are pre-cutover. `delete_by_id` was dropped when
+> `delete_by_user_key(user_id, user_key)` arrived (spec §6.10, no transitional surface), and the
+> user-facing identifier in the success message is the key, not `#<id>`. The evidence table lists
+> the current test names.
 
 ## Concept
 
 Expenses are never physically removed from the `expenses` table. Instead each
 `Expense` gains a `deleted_at: datetime | None` field. A row with a non-null
 `deleted_at` is **logically deleted** and must be filtered out of every
-user-facing data access. Rows can still be retrieved on demand via an opt-in
-`include_deleted` flag on the port (used only by internal/audit paths).
+user-facing data access. No port surface exists to retrieve them: there is no `include_deleted`
+opt-in on the port or anywhere else in `src/` (ADR 0011 removed it as unused surface area), so
+deleted rows are reachable only by reading the database directly (tests/audit), never through the
+port.
 
 ## Design decisions (agreed)
 
@@ -28,6 +40,9 @@ user-facing data access. Rows can still be retrieved on demand via an opt-in
 4. **`delete_by_id` keeps its signature and becomes logical.** It now performs an
    `UPDATE ... SET deleted_at = ?` instead of a `DELETE`, and still returns the
    deleted `Expense` for the success message. No application-layer caller changes.
+   *(ADR 0016 later renames the port method to `delete_by_user_key(user_id, user_key)`; the
+   UPDATE mechanism recorded here is unchanged. ADR 0018 (2026-10-11) binds the UPDATE to
+   the id the SELECT resolved, so the write cannot stamp a row the read did not return.)*
 5. **Filtering lives in the driven adapter.** The SQLite queries add
    `AND deleted_at IS NULL`. The application layer needs no read-path changes —
    this is the hexagonal win.
@@ -44,8 +59,8 @@ user-facing data access. Rows can still be retrieved on demand via an opt-in
 | Layer | Change |
 |---|---|
 | `domain/models.py` | `Expense` gains `deleted_at: datetime \| None`. |
-| `ports/repository.py` | Read methods filter deleted rows unconditionally; `delete_by_id` semantics change to logical. |
-| `adapters/out/sqlite_repository.py` | Schema migration + per-query `deleted_at` filtering; `save` persists `deleted_at`; `delete_by_id` becomes an `UPDATE`. |
+| `ports/repository.py` | Read methods filter deleted rows unconditionally; `delete_by_id` semantics change to logical (renamed `delete_by_user_key` by ADR 0016). |
+| `adapters/out/sqlite_repository.py` | Schema migration + per-query `deleted_at` filtering; `save` persists `deleted_at`; the delete becomes an `UPDATE`. |
 | `application/expense_queries.py` | No read-path changes. `delete_expense` unchanged (delegates to the port). |
 | `application/expense_recording.py` | `_build_expense` sets `deleted_at=None` for fresh expenses. |
 | `adapters/inbound/telegram_bot.py` | No user-facing change. Deleted rows simply vanish from listings. |
@@ -56,9 +71,9 @@ user-facing data access. Rows can still be retrieved on demand via an opt-in
 ### Happy path
 
 - [ ] Saving a new expense leaves `deleted_at` as `None`.
-- [ ] `/delete <id>` soft-deletes the expense: the row remains in the table with
-      `deleted_at` set, and the user still sees the success message
-      `🗑️ Deleted expense #<id>: <merchant> — <amount> <currency> — <date>`.
+- [ ] `/delete <key>` soft-deletes the expense (ADR 0016 cutover — the per-person key, no leading
+      `#`): the row remains in the table with `deleted_at` set, and the user still sees the success
+      message `🗑️ Deleted expense <key>: <merchant> — <amount> <currency> — <date>`.
 - [ ] The soft-deleted expense disappears from `/list` and `/report` and from the
       CSV report without any listing-code change.
 - [ ] `/list` totals and month discovery exclude soft-deleted expenses.
@@ -68,8 +83,8 @@ user-facing data access. Rows can still be retrieved on demand via an opt-in
 
 - [ ] Every read method filters deleted rows by default.
 - [ ] A wrong-user `/delete` still returns "not found" (user scoping preserved).
-- [ ] A wrong-user `/delete` still returns "not found" (user scoping preserved).
 - [ ] Soft-deleting does not reuse the row's id or disturb sibling rows.
+- [ ] The soft-delete UPDATE binds to the row the SELECT resolved (`WHERE id = ? AND deleted_at IS NULL`, ADR 0018): a row sharing the key that the read did not return — live or already deleted — is never stamped.
 - [ ] Existing databases migrate cleanly: pre-existing rows read as not-deleted.
 
 ### Must NOT happen
@@ -81,14 +96,21 @@ user-facing data access. Rows can still be retrieved on demand via an opt-in
 
 ## Evidence mapping
 
+> **Note (2026-10-11):** this table is the as-executed record at that feature's HEAD. Two later
+> decisions renamed things cited here: ADR 0013 (Liquibase owns the schema) moved the schema-migration
+> evidence to `tests/migrations/`, and ADR 0016 renamed `delete_by_id` → `delete_by_user_key`. The
+> rows below name the **current** tests; rows whose names were renamed by other branches are left as
+> they were recorded (see `git log -S <name>` if a name has no hit).
+
 | Expectation | Test location |
 |---|---|
 | deleted_at persisted as None on save | `tests/adapters/out/test_sqlite_repository.py::TestLogicalDeletion::test_save_leaves_deleted_at_none` |
-| logical delete via UPDATE, row retained | `tests/adapters/out/test_sqlite_repository.py::TestLogicalDeletion::test_delete_by_id_soft_deletes_row_retained` |
+| logical delete via UPDATE, row retained | `tests/adapters/out/test_sqlite_repository.py::TestLogicalDeletion::test_delete_by_user_key_soft_deletes_row_retained` |
 | reads filter deleted rows by default | `tests/adapters/out/test_sqlite_repository.py::TestLogicalDeletion::test_get_by_id_filters_deleted_by_default`, `::test_get_by_user_and_month_filters_deleted_by_default`, `::test_get_months_with_expenses_excludes_deleted`, `::test_get_total_by_user_and_year_excludes_deleted`, `::test_soft_delete_does_not_disturb_siblings` |
-| user scoping preserved on delete | `tests/adapters/out/test_sqlite_repository.py::TestDeleteById::test_delete_by_id_scoped_to_user` |
+| user scoping preserved on delete | `tests/adapters/out/test_sqlite_repository.py::TestDeleteByUserKey::test_delete_by_user_key_scoped_to_user` |
+| delete never stamps a row the read did not return | `tests/adapters/out/test_sqlite_repository.py::TestDeleteUnderMissingUniqueness::test_delete_by_user_key_never_restamps_an_already_deleted_twin`, `::test_delete_by_user_key_stamps_only_the_row_the_select_returned` (load-bearing); `::test_delete_by_user_key_deletes_the_live_twin_under_drift` (companion guard — passes with or without the hardening) |
 | already-deleted delete returns not-found | `tests/adapters/out/test_sqlite_repository.py::TestLogicalDeletion::test_delete_already_deleted_returns_none` |
 | application layer unchanged | `tests/application/test_expense_queries.py` (all passing, no edits) |
-| schema migration | `tests/adapters/out/test_sqlite_repository.py::TestSchemaMigration::test_existing_db_without_deleted_at_migrates` |
+| schema migration | `tests/migrations/test_changelog.py::test_legacy_database_gains_deleted_at_without_losing_rows` (renamed from `TestSchemaMigration::test_existing_db_without_deleted_at_migrates` by ADR 0013) |
 | no `DELETE FROM expenses` remains | `grep -rn "DELETE FROM" src tests` → no matches |
-| user-scoped key counts soft-deleted rows | deferred to issue #16 / ADR 0010 (key-count INSERT does not exist yet) |
+| user-scoped key counts soft-deleted rows | deferred to issue #16 / ADR 0016 (key-count INSERT does not exist yet) — proven by E10 in `docs/expectations/user-scoped-expense-keys.md` |

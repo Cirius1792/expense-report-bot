@@ -16,8 +16,11 @@ Feature: Monthly Expense Report
       | 120.00 | USD      | Hotel Luxe   | 2026-07-14 | hotel      |
     When I send the command "/report"
     Then the bot should send a CSV file named "expenses-2026-07.csv"
+    And the CSV header should be "user_key,date,merchant,category,amount,currency"
     And the CSV should contain 3 expense rows
     And the CSV should contain "Supermarket"
+    And the first CSV row should lead with "20260714-1"
+    And the CSV row for "Supermarket" should lead with "20260710-1"
     And the bot should reply with "Generated report with 3 expenses"
 
   @story-9
@@ -34,3 +37,4 @@ Feature: Monthly Expense Report
     When user 123 requests /report
     Then the CSV should contain "User 123 Shop"
     And the CSV should not contain "User 456 Shop"
+    And the CSV row for "User 123 Shop" should lead with "20260715-1"
