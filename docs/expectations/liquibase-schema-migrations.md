@@ -5,7 +5,10 @@
 - The changelog at `db/changelog/db.changelog.xml` is an XML Liquibase changelog whose first changeset creates the `expenses` table with the full current schema (id, amount, currency, merchant, date, category, user_id, receipt_photo_id, created_at, deleted_at).
 - Running `liquibase update` against a **fresh** empty database file creates the `expenses` table, the `databasechangelog` table, and the `databasechangeloglock` table, and exits 0.
 - Running `liquibase update` a second time against the same database is a no-op (no new changesets) and exits 0.
-- `SqliteExpenseRepository` opens a migrated database and all port operations (save, get_by_id, get_by_user_and_month, get_months_with_expenses, get_total_by_user_and_year, delete_by_id) work unchanged.
+- `SqliteExpenseRepository` opens a migrated database and all port operations (save, get_by_id,
+  get_by_user_and_month, get_months_with_expenses, get_total_by_user_and_year, `delete_by_id`)
+  work unchanged. *(ADR 0016 later renames the delete port method to
+  `delete_by_user_key(user_id, user_key)`; the list above is as it was when this ADR was made.)*
 - The container entrypoint script runs `liquibase update` against `EXPENSE_DB_PATH`
   in a subshell (so the bot inherits the image WORKDIR `/app`, not `/app/db`)
   and only then `exec`s the bot; the bot process ends up as the container's main

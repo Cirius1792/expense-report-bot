@@ -1,5 +1,11 @@
 # Expense Query Policy — Browsing, Reporting, and Deletion
 
+> **Amended 2026-10-10 (ADR 0016 — User-scoped Expense Keys).** The deletion seam below now
+> speaks a per-person key, not the global id: `ExpenseQueryPort.delete_expense(user_id, key)`
+> delegates to `ExpenseRepositoryPort.delete_by_user_key(user_id, user_key)`. `delete_by_id`
+> does not exist after the cutover — nothing keeps both. The CSV gains a leading `user_key`
+> column. Current contract: `docs/expectations/user-scoped-expense-keys.md` (E1–E14).
+
 ## Scope
 ARCH-003: Move `/list` (period discovery + browsing), `/report` (CSV export), and
 `/delete` (expense removal) flows from the Telegram adapter into an application-owned
@@ -32,7 +38,7 @@ class ExpenseQueryPort(Protocol):
 
     def generate_csv_report(self, user_id: int, year: int, month: int) -> str: ...
 
-    def delete_expense(self, user_id: int, expense_id: int) -> DeletionResult: ...
+    def delete_expense(self, user_id: int, user_key: str) -> DeletionResult: ...
 ```
 
 ## Output DTOs
@@ -59,26 +65,28 @@ class ExpenseQueryPort(Protocol):
 ### 3. Year Expenses (`get_year_expenses`)
 - Aggregates expenses across all months of the given year
 - Returns empty list if no expenses
-- Sort order: by month then by expense ID (consistent with current behavior)
+- Sort order: by month, then by the internal storage id (`expenses.id`) — an ordering key only;
+  that id is never shown to the user (ADR 0016, E12)
 
 ### 4. CSV Report (`generate_csv_report`)
 - Fetches current-month (or caller-specified month) expenses
 - Calls `generate_csv(expenses)` from domain
+- Header is exactly `user_key,date,merchant,category,amount,currency` — `user_key` leads; a `None` key renders as the empty field
 - Returns the CSV string
 - Returns header-only CSV for empty expense list (current behavior)
 
 ### 5. Deletion (`delete_expense`)
-- Calls `repository.delete_by_id(user_id, expense_id)`
+- Calls `repository.delete_by_user_key(user_id, user_key)` — the key, never the global id
 - Returns `DeletionResult(deleted=expense)` on success
-- Returns `DeletionResult(deleted=None)` if expense not found
+- Returns `DeletionResult(deleted=None)` if the key is not owned by that user, or is already soft-deleted
 
 ## What Stays in the Adapter
 - `_format_month_view(expenses, year, month) -> str` — view rendering
 - `_format_year_view(expenses, year) -> str` — view rendering
 - `_build_list_keyboard(active_year, year_months) -> InlineKeyboardMarkup` — Telegram keyboard
 - `_html_escape(text)` — HTML sanitization (already a utility)
-- Callback data parsing: `year:YYYY`, `month:YYYY:MM`, `delete:ID`
-- Command parsing: `/delete <id>`
+- Callback data parsing: `year:YYYY`, `month:YYYY:MM`, `delete:<key>`
+- Command parsing: `/delete <key>`
 - `BytesIO` wrapping + `reply_document` for CSV delivery
 - Strikethrough rendering for delete callbacks
 
@@ -90,9 +98,9 @@ class ExpenseQueryPort(Protocol):
 - `/list` callback `month:YYYY:MM` → shows month detail view (unchanged)
 - `/report` with expenses → sends CSV file + confirmation text (unchanged)
 - `/report` no expenses → "No expenses recorded for YYYY-MM." (unchanged)
-- `/delete <id>` success → confirmation with expense details (unchanged)
-- `/delete <id>` not found → "Expense #N was not found." (unchanged)
-- `/delete <id>` invalid format → "Usage: /delete <expense_id>" (unchanged)
+- `/delete <key>` success → confirmation with expense details (unchanged shape, key instead of id)
+- `/delete <key>` not found → "Expense <key> was not found." (unchanged wording, key instead of `#N`)
+- `/delete <key>` invalid format → "Usage: /delete <key>" (unchanged shape, `key` instead of `expense_id`)
 - Delete callback button → strikethrough + "🗑️ Deleted." (unchanged)
 - Delete callback not found → "Expense not found." as callback answer (unchanged)
 - Save confirmation still includes delete button (regression from ARCH-001)
@@ -116,6 +124,11 @@ a purpose-named Interface can be introduced at that Seam.
 
 
 ## Evidence
+
+> **Note (2026-10-10):** the run below is the as-executed record at HEAD 2ba77a4, before the
+> ADR 0016 cutover. The `#<id>` strings and `delete_by_id` names in that table are what was
+> true then; they are superseded by `docs/expectations/user-scoped-expense-keys.md` (E1–E14)
+> and are not what the code says now.
 
 ### Final verification chain (HEAD 2ba77a4)
 
@@ -192,7 +205,7 @@ All checks passed!
 - `_format_month_view`, `_format_year_view` — text rendering (unchanged)
 - `_build_list_keyboard` — Telegram InlineKeyboardMarkup (unchanged)
 - `_html_escape` — HTML sanitization (unchanged, already a utility)
-- Callback data parsing: `year:YYYY`, `month:YYYY:MM`, `delete:ID` (unchanged)
-- Command parsing: `/delete <id>` (unchanged)
+- Callback data parsing: `year:YYYY`, `month:YYYY:MM`, `delete:<key>` (key, not id)
+- Command parsing: `/delete <key>` (unchanged rendering)
 - `BytesIO` wrapping + `reply_document` for CSV delivery (unchanged)
 - Strikethrough rendering for delete callbacks (unchanged)

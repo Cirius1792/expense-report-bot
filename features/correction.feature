@@ -25,7 +25,7 @@ Feature: Correction Loop
     And the LLM refines the extraction to be complete with merchant "Ristorante Roma" and date "2026-07-18"
     Then the bot should save the expense with all fields
     And the bot should reply with a confirmation containing "Updated and saved"
-    And the bot should reply with a confirmation containing "Expense #1"
+    And the bot should reply with a confirmation containing "Expense 20260718-1"
     And the bot shows exactly these buttons: "🗑️ Delete"
     And the pending correction should be cleared
 
@@ -36,7 +36,7 @@ Feature: Correction Loop
     And the LLM refines the extraction with merchant "Best Western Hotel"
     Then the bot should save the expense with merchant "Best Western Hotel"
     And the saved expense should have amount "20.00" and currency "USD"
-    And the bot should reply with a confirmation containing "Expense #1"
+    And the bot should reply with a confirmation containing "Expense 20260720-1"
     And the bot shows exactly these buttons: "🗑️ Delete"
 
   Scenario: Correction still incomplete — ask again

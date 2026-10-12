@@ -19,7 +19,8 @@ class ExpenseRepositoryPort(Protocol):
             expense: The expense to save (may have id=None for new records).
 
         Returns:
-            The saved expense with a persistent id assigned.
+            The saved expense with its persistent id and its assigned per-person
+            `user_key`.
         """
         ...
 
@@ -36,15 +37,19 @@ class ExpenseRepositoryPort(Protocol):
         """
         ...
 
-    def delete_by_id(self, user_id: int, expense_id: int) -> Expense | None:
-        """Logically delete an expense by its id, scoped to a user.
+    def delete_by_user_key(self, user_id: int, user_key: str) -> Expense | None:
+        """Logically delete the expense a person addressed by their own key.
 
         Marks the row as deleted (deleted_at timestamp) without removing it.
-        Expenses that are already deleted are treated as not found.
+        Deleted rows are **counted** when the repository assigns keys — a freed
+        key number is never handed to a new expense — and are **excluded** from
+        every read. Ownership is part of the lookup, so another person's
+        identically-keyed expense is untouched. Expenses that are already
+        deleted are treated as not found.
 
         Args:
             user_id: The Telegram user id.
-            expense_id: The persistent integer id of the expense.
+            user_key: The per-person key (`YYYYMMDD-n`) exactly as the person typed it.
 
         Returns:
             The deleted Expense if found and deleted, None if not found.
