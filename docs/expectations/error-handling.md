@@ -51,6 +51,15 @@ no feedback.
      (e.g. the handler had already answered the callback), it is swallowed and
      logged at DEBUG, and the generic message is still sent.
 
+9. **Benign "Message is not modified" is ignored (ADR 0021).**
+   - Pressing the button for the view already displayed (e.g. the current month
+     in `/list`) makes Telegram raise
+     `BadRequest: Message is not modified: …`. The global handler treats this as
+     a no-op: it logs at INFO (no traceback, no ERROR record) and sends **no**
+     generic message, because the user is already looking at the requested view.
+   - Any other `BadRequest` (e.g. `chat not found`) still yields the generic
+     message — the benign classification is narrow, not a blanket catch.
+
 ## Non-Behaviors
 
 - No per-handler `try/except` wrapping is added: the single global error
@@ -75,4 +84,6 @@ no feedback.
 | No effective message: no crash | `TestGlobalErrorHandler::test_error_handler_no_effective_message_warns_and_returns` (pytest) |
 | Failed notification swallowed | `TestGlobalErrorHandler::test_error_handler_survives_failed_reply` (pytest) |
 | Already-answered callback tolerated | `TestGlobalErrorHandler::test_error_handler_tolerates_failed_callback_answer` (pytest) |
+| Benign "Message is not modified" ignored | `TestGlobalErrorHandler::test_error_handler_treats_message_not_modified_as_benign` (pytest) |
+| Other BadRequest still reported | `TestGlobalErrorHandler::test_error_handler_still_reports_other_bad_requests` (pytest) |
 | Registration on Application | `TestRegisterHandlers::test_registers_global_error_handler` (pytest), `TestMainStartsLogging::test_logging_configured_before_adapters` call-order (pytest) |

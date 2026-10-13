@@ -2279,6 +2279,52 @@ class TestGlobalErrorHandler:
 
         message.reply_text.assert_awaited_once_with(GENERIC_ERROR_MESSAGE)
 
+    def test_error_handler_treats_message_not_modified_as_benign(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """'Message is not modified' from Telegram is a no-op, not a failure.
+
+        Tapping the month currently shown in /list re-renders identical
+        content; Telegram rejects the edit and PTB raises BadRequest. The user
+        must NOT be told the service is unavailable, and it must not be logged
+        as an unexpected ERROR.
+        """
+        import telegram
+
+        from expense_report.adapters.inbound.telegram_bot import handle_unexpected_error
+
+        caplog.set_level(logging.DEBUG)
+        update = _make_update()
+        update.callback_query = None
+        error = telegram.error.BadRequest(
+            "Message is not modified: specified new message content and reply "
+            "markup are exactly the same as a current content and reply markup "
+            "of the message"
+        )
+        context = self._make_error_context(error)
+
+        asyncio.run(handle_unexpected_error(update, context))  # must not raise
+
+        update.effective_message.reply_text.assert_not_awaited()
+        assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+    def test_error_handler_still_reports_other_bad_requests(self) -> None:
+        """A BadRequest unrelated to 'not modified' still yields the generic message."""
+        import telegram
+
+        from expense_report.adapters.inbound.telegram_bot import (
+            GENERIC_ERROR_MESSAGE,
+            handle_unexpected_error,
+        )
+
+        update = _make_update()
+        update.callback_query = None
+        context = self._make_error_context(telegram.error.BadRequest("chat not found"))
+
+        asyncio.run(handle_unexpected_error(update, context))
+
+        update.effective_message.reply_text.assert_awaited_once_with(GENERIC_ERROR_MESSAGE)
+
 
 class TestMainFunction:
     """Tests for the main() entry point."""

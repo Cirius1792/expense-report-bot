@@ -13,6 +13,7 @@ from decimal import Decimal
 from html import escape as _html_escape
 from io import BytesIO
 
+import telegram
 from telegram import (
     BotCommand,
     InlineKeyboardButton,
@@ -531,6 +532,20 @@ def register_handlers(
     )
 
 
+def _is_message_not_modified(error: BaseException | None) -> bool:
+    """Return True when Telegram rejected an edit because nothing changed.
+
+    Pressing the button for the view already displayed (e.g. the current month
+    in /list) re-renders identical text and keyboard. Telegram then raises
+    ``BadRequest: Message is not modified``, which is a benign no-op — the user
+    is already looking at the requested view. It must not surface as a service
+    failure nor be logged as an unexpected error.
+    """
+    return isinstance(error, telegram.error.BadRequest) and str(error).startswith(
+        "Message is not modified"
+    )
+
+
 async def handle_unexpected_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Global PTB error handler for unhandled exceptions in any bot handler.
 
@@ -546,6 +561,11 @@ async def handle_unexpected_error(update: object, context: ContextTypes.DEFAULT_
     never reach the user.
     """
     error = context.error
+
+    if _is_message_not_modified(error):
+        logger.info("Ignoring benign Telegram edit: message content unchanged")
+        return
+
     logger.error("Unhandled error while processing update: %s", error, exc_info=error)
 
     if update is None:
