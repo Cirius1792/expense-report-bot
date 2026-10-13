@@ -1,0 +1,40 @@
+<!-- Source template for site/assets/og-image.png (the 1200x630 social card).
+     NOT published by pages.yml — it lives outside site/ on purpose.
+     Regenerate from the repo root with:
+       google-chrome --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
+         --window-size=1200,630 \
+         --screenshot=site/assets/og-image.png docs/og-image.template.html
+-->
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../site/assets/icons.css">
+<link rel="stylesheet" href="../site/assets/style.css">
+<style>
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body.og { background: var(--paper); padding: 68px 72px; display: flex; flex-direction: column; }
+  .og-top { display: flex; align-items: center; justify-content: space-between; }
+  .og-brand { display: flex; align-items: center; gap: 12px; }
+  .og-brand img { width: 40px; height: 40px; border-radius: 50%; }
+  .og-brand span { font-family: var(--serif); font-weight: 600; font-size: 1.5rem; color: var(--ink); }
+  .og-url { font-family: var(--mono); font-size: 0.85rem; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
+  .og-mid { margin-top: auto; margin-bottom: auto; }
+  .og h1 { font-size: 4.6rem; line-height: 1.02; margin: 18px 0 20px; max-width: none; }
+  .og p { font-size: 1.35rem; max-width: 62ch; color: var(--ink-2); }
+  .og-foot { display: flex; gap: 26px; align-items: center; font-family: var(--mono); font-size: 0.95rem;
+             color: var(--muted); border-top: 1px solid var(--rule); padding-top: 22px; }
+  .og-foot b { color: var(--teal-deep); font-weight: 600; }
+</style></head>
+<body class="og">
+  <div class="og-top">
+    <div class="og-brand"><img src="../site/assets/logo-192.png" alt=""><span>(ex)SpenserBot</span></div>
+    <div class="og-url">Self-hosted · Telegram · MIT</div>
+  </div>
+  <div class="og-mid">
+    <p class="kicker" style="max-width:none">Your expenses</p>
+    <h1>Receipts in. <em>Ledger out.</em></h1>
+    <p>A Telegram bot that turns receipt photos, PDF invoices, and plain sentences into a structured expense log — with LLM extraction you can correct.</p>
+  </div>
+  <div class="og-foot">
+    <span><b>Docker</b> deploy</span><span>SQLite</span><span>Monthly CSV</span><span>Per-user isolation</span><span>Whitelist + audit log</span>
+  </div>
+</body></html>
