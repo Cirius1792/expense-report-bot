@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deployment — (ex)SpenserBot</title>
+<meta name="description" content="Deploy (ex)SpenserBot with Docker Compose: environment files, data persistence, authorization paths, and day-2 operations.">
+<meta name="color-scheme" content="light">
+<link rel="canonical" href="https://cirius1792.github.io/expense-report-bot/docs/deployment.html">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="(ex)SpenserBot">
+<meta property="og:locale" content="en">
+<meta property="og:url" content="https://cirius1792.github.io/expense-report-bot/docs/deployment.html">
+<meta property="og:title" content="Deployment — (ex)SpenserBot">
+<meta property="og:description" content="Deploy (ex)SpenserBot with Docker Compose: environment files, data persistence, authorization paths, and day-2 operations.">
+<meta property="og:image" content="https://cirius1792.github.io/expense-report-bot/assets/og-image.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="(ex)SpenserBot — receipts in, ledger out">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Deployment — (ex)SpenserBot">
+<meta name="twitter:description" content="Deploy (ex)SpenserBot with Docker Compose: environment files, data persistence, authorization paths, and day-2 operations.">
+<meta name="twitter:image" content="https://cirius1792.github.io/expense-report-bot/assets/og-image.png">
+<meta name="twitter:image:alt" content="(ex)SpenserBot — receipts in, ledger out">
+<link rel="preload" href="../assets/fonts/fraunces-var.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="../assets/fonts/plexsans-var.woff2" as="font" type="font/woff2" crossorigin>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://cirius1792.github.io/expense-report-bot/"},{"@type":"ListItem","position":2,"name":"Documentation","item":"https://cirius1792.github.io/expense-report-bot/docs/"},{"@type":"ListItem","position":3,"name":"Deployment","item":"https://cirius1792.github.io/expense-report-bot/docs/deployment.html"}]}</script>
+<meta name="theme-color" content="#faf8f4">
+<link rel="icon" type="image/png" sizes="192x192" href="../assets/logo-192.png">
+<link rel="stylesheet" href="../assets/icons.css">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<nav class="nav" aria-label="Primary">
+  <div class="nav-inner">
+    <a class="brand" href="../index.html"><img src="../assets/logo-96.png" alt="" width="30" height="30"><span>(ex)SpenserBot</span></a>
+    <div class="nav-links">
+      <a href="../index.html">Home</a>
+      <a href="../docs/index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/Cirius1792/expense-report-bot" class="ext">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<main id="main">
+  <header class="docs-head">
+    <div class="wrap">
+      <p class="crumb"><a href="../index.html">Home</a> / <a href="index.html">Documentation</a> / Deployment</p>
+      <h1>Deployment</h1>
+      <p class="lede">Run (ex)SpenserBot with Docker Compose on any machine that can reach Telegram and your LLM endpoint.</p>
+      <nav class="tabs" aria-label="Documentation">
+      <a href="index.html">Getting started</a>
+      <a href="deployment.html" aria-current="page">Deployment</a>
+      <a href="configuration.html">Configuration</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="docs">
+    <div class="wrap">
+      <article>
+        <h2>How the env files work</h2>
+        <p>The setup uses <strong>two separate env files</strong> for two different purposes:</p>
+        <div class="table-scroll" tabindex="0" role="region" aria-label="Environment files"><table class="ref wide">
+          <thead>
+            <tr><th scope="col">File</th><th scope="col">Purpose</th><th scope="col">Used by</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>.env</code></td>
+              <td>Bot runtime variables: <code>TELEGRAM_BOT_TOKEN</code>, <code>LLM_*</code>, <code>AUTHORIZED_USERS_CONFIG_PATH</code>, …</td>
+              <td><code>docker-compose.yml</code> <code>env_file:</code> — injected into the running container</td>
+            </tr>
+            <tr>
+              <td><code>.env.deploy</code></td>
+              <td>Compose interpolation only: <code>${UID}</code>, <code>${GID}</code></td>
+              <td><code>--env-file .env.deploy</code> flag — resolved at <code>docker compose up</code> time, <em>not</em> passed to the container</td>
+            </tr>
+          </tbody>
+        </table></div>
+
+        <h2>Deployment steps</h2>
+        <pre tabindex="0" role="region" aria-label="Deployment shell commands"><code><span class="c"># 1. Clone the repository</span>
+git clone git@github.com:Cirius1792/expense-report-bot.git
+cd expense-report-bot
+
+<span class="c"># 2. Runtime env file (for the container environment)</span>
+cp .env.example .env
+<span class="c"># edit .env with your Telegram token, LLM credentials, and authorization paths</span>
+
+<span class="c"># 3. Compose interpolation file (for host file ownership)</span>
+cp .env.deploy.example .env.deploy
+<span class="c"># edit UID/GID if your host user is not 1000:1000</span>
+
+<span class="c"># 4. Allow your user — the whitelist file must be reachable at the</span>
+<span class="c">#    container path set in .env (see below)</span>
+mkdir -p data
+echo '{"authorized_users": ["YOUR_TELEGRAM_USER_ID"]}' &gt; data/authorized-users.json
+
+<span class="c"># 5. Start</span>
+docker compose --env-file .env.deploy up -d</code></pre>
+
+        <div class="callout warn"><strong>Important path difference.</strong> In <code>.env</code>, set <code>AUTHORIZED_USERS_CONFIG_PATH=/data/authorized-users.json</code> (the <em>container</em> path, not the default local path from <code>.env.example</code>) and place the whitelist file in <code>./data/</code> on the host, which is bind-mounted to <code>/data</code> in the container.</div>
+
+        <h2>Container behavior</h2>
+        <ul>
+          <li><strong>User &amp; permissions</strong> — the container runs as the <code>UID:GID</code> from <code>.env.deploy</code>, so the bind-mounted database is owned by your host user.</li>
+          <li><strong>Persistence</strong> — the SQLite database is stored at <code>./data/expenses.db</code> on the host. Back up that file to back up your expenses.</li>
+          <li><strong>Authorization</strong> — read from <code>AUTHORIZED_USERS_CONFIG_PATH</code> at runtime. See the <a href="configuration.html">configuration reference</a> for the file format and failure behaviors.</li>
+          <li><strong>Audit logging</strong> — optionally set <code>UNAUTHORIZED_LOG_PATH=/data/unauthorized.log</code> in <code>.env</code> for a dedicated audit log in the persisted volume.</li>
+          <li><strong>Lifecycle</strong> — <code>restart: unless-stopped</code> keeps the bot running across reboots.</li>
+        </ul>
+
+        <h2>Day-2 operations</h2>
+        <pre tabindex="0" role="region" aria-label="Day-2 operations"><code>docker compose --env-file .env.deploy logs -f   <span class="c"># follow logs</span>
+docker compose --env-file .env.deploy down      <span class="c"># stop the bot</span>
+docker compose --env-file .env.deploy up -d     <span class="c"># start again</span></code></pre>
+        <p>To update, pull the latest code (or tag) and re-run <code>up -d</code>. Your data in <code>./data/</code> is untouched.</p>
+
+        <h2>Docker image</h2>
+        <p>Releases are tag-triggered: pushing a <code>vX.Y.Z</code> tag builds and pushes the image to <code>ghcr.io/Cirius1792/spencer-bot</code> (tags: full version, minor, and <code>latest</code>) and creates a GitHub Release. You can either run from a source checkout (steps above) or pull the published image directly — see the <a href="https://github.com/Cirius1792/expense-report-bot/releases">releases page</a> for available versions.</p>
+        <div class="next">
+          <a class="btn btn-ghost" href="index.html">Getting started</a>
+          <a class="btn btn-ghost" href="configuration.html">Configuration reference</a>
+        </div>
+      </article>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="foot-brand"><img src="../assets/logo-96.png" alt="" width="26" height="26"><span>(ex)SpenserBot</span></div>
+        <p>A self-hosted Telegram bot that turns receipt photos, PDFs, and plain sentences into a structured expense log.</p>
+      </div>
+      <div>
+        <h4>Documentation</h4>
+        <ul>
+          <li><a href="../docs/index.html">Getting started</a></li>
+          <li><a href="../docs/deployment.html">Deployment</a></li>
+          <li><a href="../docs/configuration.html">Configuration</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Project</h4>
+        <ul>
+          <li><a href="https://github.com/Cirius1792/expense-report-bot">Source on GitHub</a></li>
+          <li><a href="https://github.com/Cirius1792/expense-report-bot/releases">Releases</a></li>
+          <li><a href="https://github.com/Cirius1792/expense-report-bot/tree/main/docs/adr">Architecture decisions</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-bar">
+      <span>MIT licensed · © 2026 Ciro Lucio Tecce</span>
+      <span>No hosted instance · no telemetry · self-hosted by design</span>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

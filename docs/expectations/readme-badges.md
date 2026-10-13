@@ -1,8 +1,13 @@
 # Expectations: README Tests + Coverage Badges
 
 **Scope:** README.md + `.github/workflows/ci.yml` + `pyproject.toml` (dev deps only).
-No `src/` changes. Badge URLs use the repo name exactly as `expese-report-bot`
-(known upstream typo — must be preserved verbatim).
+No `src/` changes.
+
+> **Amended 2026-10-13 — repo renamed.** The owner renamed the GitHub repository
+> from `expese-report-bot` to `expense-report-bot`, which voids the original
+> "typo must be preserved verbatim" constraint. Badge URLs, clone commands, the
+> Pages origin in `site/**`, and the canonical/OG/sitemap URLs all use
+> `expense-report-bot` as of that date. The old slug still 301-redirects.
 
 ## Happy path
 
