@@ -10,7 +10,11 @@ public bot instance — the primary CTA is "self-host it".
 - `site/docs/index.html` — docs home / getting started
 - `site/docs/deployment.html` — deployment instructions (Docker Compose)
 - `site/docs/configuration.html` — configuration reference
-- `site/assets/logo.png`, `site/assets/style.css` — shared assets
+- `site/assets/logo-96.png` (nav/footer/chat avatar) and `logo-192.png` (favicon),
+  `site/assets/style.css` — shared assets
+- `site/assets/icons.css` — hand-built CSS-art icon set (no emoji, no icon font)
+- `site/assets/fonts/` — self-hosted latin woff2 subsets (Fraunces, IBM Plex Sans,
+  IBM Plex Mono) + `OFL.txt` license text
 - `.github/workflows/pages.yml` — deploys `site/` to GitHub Pages
 
 ## Landing page content (must include)
@@ -28,7 +32,9 @@ public bot instance — the primary CTA is "self-host it".
 - Configuration: all env vars (required/optional), `authorized-users.json` schema, startup failure behaviors, audit log format, user isolation
 
 ## Behaviors that must NOT happen
-- No external CDN dependencies (fonts, JS frameworks) — site must render fully offline with only local files
+- No external subresources at all: every `img`/`script`/`link`/`@font-face src` resolves inside `site/`, so the pages render fully offline (external *hyperlinks* to `t.me`/`github.com` are allowed). The old GitHub badge images were removed for this reason.
+- No emoji in any site file — all glyphs are CSS art from `site/assets/icons.css`
+- Visual language, typography, palette, and icon rules are specified in `site-visual-redesign.md`
 - No links to a public bot instance (none exists)
 - No broken internal links — every relative link must resolve to an existing file
 - No secrets or credentials in any site file
