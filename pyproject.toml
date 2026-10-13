@@ -5,6 +5,8 @@ description = "A Telegram bot that extracts structured expense data from receipt
 authors = [
     { name = "Ciro Lucio Tecce", email = "cirolucio.tecce@gmail.com" }
 ]
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "dspy-ai>=2.6",
