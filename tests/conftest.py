@@ -146,6 +146,21 @@ class _FakeInlineKeyboardMarkup:
         self.inline_keyboard = inline_keyboard
 
 
+# telegram.error — real exception classes so error-handling tests can raise
+# the exact exceptions PTB raises in production (e.g. BadRequest
+# "Message is not modified" when a callback re-renders unchanged content).
+class _FakeBadRequestError(Exception):
+    """Stand-in for telegram.error.BadRequest carrying a .message attribute."""
+
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.message = message
+
+
+mock_telegram_error = MagicMock()
+mock_telegram_error.BadRequest = _FakeBadRequestError
+mock_telegram.error = mock_telegram_error
+
 mock_telegram.InlineKeyboardButton = _FakeInlineKeyboardButton
 mock_telegram.InlineKeyboardMarkup = _FakeInlineKeyboardMarkup
 
