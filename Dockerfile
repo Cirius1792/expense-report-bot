@@ -31,10 +31,13 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --no-install-project --frozen
 
-# Second layer: application source
+# Second layer: application source and package metadata.
 COPY src/ ./src/
 COPY db/ ./db/
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
+# `license-files = ["LICENSE"]` in pyproject.toml: uv_build rejects the project
+# build if this metadata file is absent from the build context.
+COPY LICENSE ./LICENSE
 
 # Install the project itself
 RUN --mount=type=cache,target=/root/.cache/uv \

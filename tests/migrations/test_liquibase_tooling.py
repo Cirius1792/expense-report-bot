@@ -79,6 +79,23 @@ def test_dockerfile_bases_on_bundled_driver_image_without_lib_copy() -> None:
     assert "COPY lib/" not in dockerfile
 
 
+def test_dockerfile_copies_license_before_building_the_project() -> None:
+    """`license-files` metadata must ship in-image or the project build fails.
+
+    pyproject declares `license-files = ["LICENSE"]`. The dependency layer copies
+    only `pyproject.toml` and `uv.lock`, then the project install
+    (`uv sync --no-dev --frozen`) rebuilds the package from `src/`. If LICENSE is
+    absent there, `uv_build` rejects the metadata ("`project.license-files` glob
+    `LICENSE` did not match any files") and the image build fails.
+    """
+    dockerfile = _read("Dockerfile")
+    license_copy = dockerfile.find("COPY LICENSE")
+    project_build = dockerfile.rfind("uv sync --no-dev --frozen")
+    assert license_copy != -1, "Dockerfile must COPY the LICENSE file"
+    assert project_build != -1
+    assert license_copy < project_build, "LICENSE must be copied before the project build"
+
+
 def _workflows_text() -> str:
     workflows = REPO_ROOT / ".github" / "workflows"
     return "\n".join(path.read_text(encoding="utf-8") for path in sorted(workflows.glob("*.yml")))
