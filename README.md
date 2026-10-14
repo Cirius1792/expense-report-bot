@@ -9,7 +9,7 @@
   <img src="https://raw.githubusercontent.com/Cirius1792/expense-report-bot/refs/heads/main/coverage.svg" alt="Coverage">
 </p>
 
-(ex)SpenserBot is a Telegram bot that extracts structured expense data from receipt photos and free-text messages using LLM-powered extraction. Built with a hexagonal (ports & adapters) architecture.
+[(ex)SpenserBot](https://cirius1792.github.io/expense-report-bot/) is a Telegram bot that extracts structured expense data from receipt photos and free-text messages using LLM-powered extraction. 
 
 ## Features
 
