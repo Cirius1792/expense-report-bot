@@ -82,50 +82,7 @@ class ExpenseRecordingUseCase:
         if command.mode == RecordingMode.CONVERSATIONAL and command.source_type == SourceType.TEXT:
             pending = self._store.get(command.user_id)
             if pending is not None:
-                if pending.maxed_out:
-                    logger.info(
-                        "Correction maxed out for user %s (attempt %s/3), clearing",
-                        command.user_id,
-                        pending.attempt_count,
-                    )
-                    self._store.remove(command.user_id)
-                    return CorrectionLimitReached()
-
-                logger.info(
-                    "Correction received from user %s (attempt %s/3)",
-                    command.user_id,
-                    pending.attempt_count,
-                )
-                assert isinstance(command.source, str)
-                refined = self._extraction.refine(pending.original_result, command.source)
-
-                if refined.is_complete:
-                    # Correction resolved: save (receipt_photo_id always None), clear
-                    expense = _build_expense(refined, command.user_id, None)
-                    saved_expense = self._repository.save(expense)
-                    self._store.remove(command.user_id)
-                    logger.info(
-                        "Correction resolved for user %s: saved updated expense",
-                        command.user_id,
-                    )
-                    return CorrectionResolved(expense=saved_expense, extraction=refined)
-
-                # Still incomplete: increment attempt, keep original result
-                updated = PendingCorrection(
-                    user_id=command.user_id,
-                    original_result=pending.original_result,
-                    attempt_count=pending.attempt_count + 1,
-                )
-                self._store.set(command.user_id, updated)
-                logger.info(
-                    "Correction still incomplete for user %s (attempt %s)",
-                    command.user_id,
-                    updated.attempt_count,
-                )
-                return CorrectionStillIncomplete(
-                    extraction=refined,
-                    attempt_count=updated.attempt_count,
-                )
+                return self._handle_pending_correction(command, pending)
 
         # ── Fresh recording (ONE_SHOT, CONVERSATIONAL without pending, any source) ──
         try:
@@ -144,9 +101,7 @@ class ExpenseRecordingUseCase:
             expense = _build_expense(result, command.user_id, command.receipt_photo_id)
             saved_expense = self._repository.save(expense)
             return ExpenseRecorded(expense=saved_expense, extraction=result)
-
-        # Incomplete fresh extraction
-        if command.mode == RecordingMode.CONVERSATIONAL:
+        elif command.mode == RecordingMode.CONVERSATIONAL:
             self._store.set(
                 command.user_id,
                 PendingCorrection(
@@ -157,3 +112,49 @@ class ExpenseRecordingUseCase:
             return CorrectionOpened(extraction=result)
 
         return ExtractionIncomplete(extraction=result)
+
+    def _handle_pending_correction(self, command: RecordExpense, pending: PendingCorrection) -> RecordingOutcome:
+        if pending.maxed_out:
+            logger.info(
+                "Correction maxed out for user %s (attempt %s/3), clearing",
+                command.user_id,
+                pending.attempt_count,
+            )
+            self._store.remove(command.user_id)
+            return CorrectionLimitReached()
+
+        logger.info(
+            "Correction received from user %s (attempt %s/3)",
+            command.user_id,
+            pending.attempt_count,
+        )
+        assert isinstance(command.source, str)
+        refined = self._extraction.refine(pending.original_result, command.source)
+
+        if refined.is_complete:
+            # Correction resolved: save (receipt_photo_id always None), clear
+            expense = _build_expense(refined, command.user_id, None)
+            saved_expense = self._repository.save(expense)
+            self._store.remove(command.user_id)
+            logger.info(
+                "Correction resolved for user %s: saved updated expense",
+                command.user_id,
+            )
+            return CorrectionResolved(expense=saved_expense, extraction=refined)
+
+        # Still incomplete: increment attempt, keep original result
+        updated = PendingCorrection(
+            user_id=command.user_id,
+            original_result=pending.original_result,
+            attempt_count=pending.attempt_count + 1,
+        )
+        self._store.set(command.user_id, updated)
+        logger.info(
+            "Correction still incomplete for user %s (attempt %s)",
+            command.user_id,
+            updated.attempt_count,
+        )
+        return CorrectionStillIncomplete(
+            extraction=refined,
+            attempt_count=updated.attempt_count,
+        )
