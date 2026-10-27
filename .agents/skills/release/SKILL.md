@@ -19,18 +19,17 @@ Use [Semantic Versioning](https://semver.org/):
 
 ### 2. Update pyproject.toml
 
-Edit the `version` field in `pyproject.toml`:
-
-```toml
-[project]
-version = "1.2.3"
+```bash
+# 2. Bump the version (rewrites pyproject.toml AND uv.lock)
+uv version --bump patch    # or: minor / major
 ```
 
 ### 3. Commit the version bump
 
 ```bash
-git add pyproject.toml
-git commit -m "chore: bump version to 1.2.3"
+# 3. Commit both files — the gate and the release validation both require them
+git add pyproject.toml uv.lock
+git commit -m "chore: bump version to $(uv version --short)"
 ```
 
 ### 4. Create and push the tag
@@ -60,5 +59,6 @@ The `release.yml` workflow runs on the tag push:
 - **Pre-release versions** (`v1.2.3-beta.1`, `v1.2.3-rc.1`) work but do NOT get `latest` or `major.minor` Docker tags — only the full version tag
 - **Version 0.x.y** follows semver 0.x rules: `0.1.0` → tags `0.1.0`, `0.1`, `latest`
 - **Mismatched tag/version** — the `validate-version` job fails fast if the tag doesn't match `pyproject.toml`
+- **Version bump lockfile sync** — a version bump that changes only `pyproject.toml` fails `version-check` because `uv.lock` must record the same version
 - **CI must be green first** — the `tests` job runs the full suite; if it fails, the image is never built
 - **No rollback built-in** — to roll back, re-tag an earlier commit and push
