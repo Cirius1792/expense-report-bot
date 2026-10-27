@@ -17,13 +17,25 @@ jobs:
       - name: Validate tag matches pyproject.toml version
         run: |
           TAG_VERSION="${GITHUB_REF#refs/tags/v}"
-          PYPROJECT_VERSION=$(grep '^version = ' pyproject.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          PYPROJECT_VERSION="$(uv version --short)"
+          LOCK_VERSION="$(python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          lock = tomllib.loads(Path("uv.lock").read_text(encoding="utf-8"))
+          print(next(p["version"] for p in lock["package"] if p["name"] == "expense-report-bot"))
+          PY
+          )"
 
           if [ "$TAG_VERSION" != "$PYPROJECT_VERSION" ]; then
             echo "::error::Tag version ($TAG_VERSION) does not match pyproject.toml ($PYPROJECT_VERSION)"
             exit 1
           fi
-          echo "Version $TAG_VERSION validated"
+          if [ "$LOCK_VERSION" != "$PYPROJECT_VERSION" ]; then
+            echo "::error::uv.lock version ($LOCK_VERSION) does not match pyproject.toml ($PYPROJECT_VERSION)"
+            exit 1
+          fi
+          echo "Version $TAG_VERSION validated (pyproject.toml and uv.lock agree)"
 
   tests:
     needs: validate-version
