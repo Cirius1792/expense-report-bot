@@ -22,6 +22,27 @@
 
 > If commands fail, verify against pyproject.toml or ask user to update.
 
+## Version bump gate
+
+Any PR changing `src/**`, `db/**`, `Dockerfile`, `docker-entrypoint.sh`, `LICENSE`,
+`pyproject.toml`, or `uv.lock` **must** raise `[project].version` with
+`uv version --bump patch|minor|major` and **commit both `pyproject.toml` and
+`uv.lock`**.
+
+Docs-, test-, CI-, and skill-only PRs need no bump.
+
+Local pre-flight (run before pushing):
+
+```bash
+uv run --no-project python -m scripts.check_pr_version origin/main HEAD
+```
+
+Do not merge a PR while the `version-check` job is red; do not "fix" a red gate by
+editing the policy lists without a documented reason (that is a review decision,
+recorded in ADR 0023).
+
+Never run `uv lock` inside the gate job; the gate only reads.
+
 ## Pre-commit Hooks
 
 **Gitleaks** scans every commit for secrets (API keys, tokens, passwords).
