@@ -252,6 +252,7 @@ class DspyExtractionAdapter:
         last_exception: Exception | None = None
         delays = [1, 2]
         for attempt in range(3):
+            #TODO: make the number of attempt a configuration parameter instead of an hard constant
             try:
                 logger.debug("Text extraction attempt %s/3", attempt + 1)
                 return self._text_extractor(source=source)
